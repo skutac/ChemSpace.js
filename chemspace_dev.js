@@ -1,24 +1,3 @@
-/**
-* @license smilesDrawer Copyright (c) 2017 GDB / Reymond Research Group.
-* 
-* Permission is hereby granted, free of charge, to any person obtaining a copy
-* of this software and associated documentation files (the "Software"), to deal
-* in the Software without restriction, including without limitation the rights
-* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-* copies of the Software, and to permit persons to whom the Software is
-* furnished to do so, subject to the following conditions:
-* 
-* The above copyright notice and this permission notice shall be included in all
-* copies or substantial portions of the Software.
-* 
-* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-* SOFTWARE.
-*/
 
 /*DEEP MERGE*/
 function isMergeableObject(e){return e&&"object"==typeof e&&"[object RegExp]"!==Object.prototype.toString.call(e)&&"[object Date]"!==Object.prototype.toString.call(e)}function emptyTarget(e){return Array.isArray(e)?[]:{}}function cloneIfNecessary(e,r){return r&&!0===r.clone&&isMergeableObject(e)?deepmerge(emptyTarget(e),e,r):e}function defaultArrayMerge(e,r,t){var a=e.slice();return r.forEach(function(r,c){void 0===a[c]?a[c]=cloneIfNecessary(r,t):isMergeableObject(r)?a[c]=deepmerge(e[c],r,t):-1===e.indexOf(r)&&a.push(cloneIfNecessary(r,t))}),a}function mergeObject(e,r,t){var a={};return isMergeableObject(e)&&Object.keys(e).forEach(function(r){a[r]=cloneIfNecessary(e[r],t)}),Object.keys(r).forEach(function(c){isMergeableObject(r[c])&&e[c]?a[c]=deepmerge(e[c],r[c],t):a[c]=cloneIfNecessary(r[c],t)}),a}function deepmerge(e,r,t){var a=Array.isArray(r),c=(t||{arrayMerge:defaultArrayMerge}).arrayMerge||defaultArrayMerge;return a?Array.isArray(e)?c(e,r,t):cloneIfNecessary(r,t):mergeObject(e,r,t)}deepmerge.all=function(e,r){if(!Array.isArray(e)||e.length<2)throw new Error("first argument should be an array with at least two elements");return e.reduce(function(e,t){return deepmerge(e,t,r)})};
