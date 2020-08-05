@@ -1,4 +1,4 @@
-import csv, json, argparse, copy, re, os, urllib2
+import csv, json, argparse, copy, re, os, requests
 
 import numpy as np
 from scipy.spatial import distance
@@ -523,12 +523,14 @@ class ChemSpace():
                 coords = layout.coords
 
             elif (method in ["csn", "csn_weighted", "nn", "mds"] or by == "dm") and not self.dist_matrix:
+                
                 if len(fps) == 0:
                     for index in self.index_order:
                         fps.append(self.index2fpobj[index])
                     bitvects = True
                         
-                elif type(fps[0][1]) in [unicode, int] and not bitvects:
+                elif type(fps[0][1]) in [str, int] and not bitvects:
+                    print(fps)
                     self.__convert_fps_to_bitvects__(fps)
                     bitvects = True
                     
@@ -536,7 +538,6 @@ class ChemSpace():
                 dist_matrix = np.matrix([np.array(self.dist_matrix[index]) for index in self.index_order])
 
                 if knn is not None:
-                    print knn
                     self.__get_edges__(similarity_threshold=similarity_threshold, knn=knn)
 
                 data = dist_matrix
@@ -615,6 +616,7 @@ class ChemSpace():
                 feature_names = ["UMAP1", "UMAP2"]
                 umap = UMAP(n_neighbors=5, min_dist=1, metric="jaccard")
                 coords = umap.fit_transform(data)
+                coords = [[float(x[0]), float(x[1])] for x in coords]
 
             # elif method == "sas":
             #     print("\nCalculating SAS...")
@@ -782,12 +784,12 @@ class ChemSpace():
         for l in libs:
             lib, url = l
             try:
-                source = urllib2.urlopen(url)
+                source = requests.get(url)
                 source_html = source.read()
 
                 with open(os.path.join(htmldir, lib), "w") as output:
                     output.write(source_html)
-            except urllib2.URLError as e:
+            except requests.exceptions.RequestException as e:
                 raise Exception("""
                         \nCan't download file {}.\nPlease check your internet connection and try again.\nIf the error persists there can be something wrong with the InCHlib server.\n""".format(url)
                     )
