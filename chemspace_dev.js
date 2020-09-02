@@ -1949,7 +1949,7 @@ var _date = new Date();
       }
 
       var slider_defs = [
-        {"name": "resolution", "min": 0, "max": 50, "value": self.settings.resolution, "label": "Resolution", "type": "resolution", "step": 5},
+        {"name": "resolution", "min": 0, "max": 50, "value": self.settings.resolution, "label": "Resolution", "type": "resolution", "step": 2},
       ];
 
       for(var i = 0, len=slider_defs.length; i<len; i++){
