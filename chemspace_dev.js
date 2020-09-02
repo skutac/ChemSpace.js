@@ -817,9 +817,6 @@ var _date = new Date();
       self.point_id2categories = self._get_id2categories();
 
       self._get_links_feature();
-      if(self.data.feature_names.indexOf("Point count [internal]") === -1){
-        self.data.feature_names.push("Point count [internal]");
-      }
 
       if(self.settings.compounds.draw && self.data.compounds === undefined){
           self.settings.compounds.draw = false;
@@ -925,7 +922,9 @@ var _date = new Date();
             }
 
             if(values.length == 1){
+                console.log(self.data.points[point_id].features);
                 self.data.points[point_id].features.push(values[0]);
+                console.log(self.data.points[point_id].features);
             }
             else if(values.length > 1){
                 self.data.points[point_id].features.push(self._hack_round(total/values.length));
@@ -982,7 +981,7 @@ var _date = new Date();
     self.data.categories.push(category);
     self._process_categories(self.data.categories);
     self.point_id2categories = self._get_id2categories();
-    self._sort_layers();
+    // self._sort_layers();
   }
 
   /**
@@ -2016,6 +2015,7 @@ var _date = new Date();
 
         if(name === 'color' || name === 'point_size'){
           self.settings[name].index = (isNaN(parseInt(value)))?value:parseInt(value);
+          console.log(self.settings[name].index)
         }
         else{
           self.settings.coordinates[name] = (isNaN(parseInt(value)))?value:parseInt(value);
@@ -2312,6 +2312,7 @@ var _date = new Date();
 
   ChemSpace.prototype._calculate_coordinates = function(point_ids){
     var self = this;
+    console.log(self.data.feature_names)
 
     if(self.use_cache && point_ids == undefined && [self._prop2settings.coordinates.x, self._prop2settings.coordinates.y].join("_") == [self.settings.coordinates.x, self.settings.coordinates.y].join("_")){
       console.log("COORDINATES CACHE");
@@ -2400,7 +2401,12 @@ var _date = new Date();
         }
       }
     
+    if(self.data.feature_names.indexOf("Point count [internal]") === -1){
+      self.data.feature_names.push("Point count [internal]");
+    }
+    
     let point_count_index = self.data.feature_names.indexOf("Point count [internal]");
+
     let x_keys = Object.keys(self.point_index);
     for(let i = 0, x_len=x_keys.length; i < x_len; i++){
         let x_key = x_keys[i];
@@ -3012,6 +3018,7 @@ var _date = new Date();
             var prop_index = self.settings[prop].index;
             for(var i = 0, len=keys.length; i<len; i++){
               var value = self.data.points[keys[i]].features[prop_index];
+              // console.log(self.data.points[keys[i]])
               if(value !== null && value !== undefined){
                 data.push(value);
                 v2v[value] = null;
@@ -3023,7 +3030,7 @@ var _date = new Date();
         var len = data.length;
         data.sort(self._sort_number_ascending);
         var min_max_middle = self._get_min_max_middle(data, self.settings[prop].params);
-
+        // console.log(min_max_middle, data)
         if(self.settings[prop].value_type === "value"){
           min_max_middle["min"] = (settings.params.min !== undefined)?settings.params.min:min_max_middle["abs_min"];
           min_max_middle["max"] = (settings.params.max !== undefined)?settings.params.max:min_max_middle["abs_max"];
