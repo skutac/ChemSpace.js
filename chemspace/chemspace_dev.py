@@ -53,9 +53,19 @@ FP2FNC = {
 
 AVAILABLE_METRICS = ["Tanimoto", "Dice", "Cosine", "Sokal", "Russel", "RogotGoldberg", "AllBit", "Kulczynski", "McConnaughey", "Asymmetric", "BraunBlanquet"]
 
+DATA_KEYS = {
+    "default": {},
+    "compressed": {
+        "features": "f",
+        "object_ids": "o",
+        "smiles": "s",
+        "label": "l"
+    }
+}
+
 class ChemSpace():
 
-    def __init__(self, category_field = False, category_field_delimiter = False, label_field = False, compound_structure_field = False, write_structures = True, fp = "ecfp4", fingerprint_field = False, metric = "Tanimoto", pcp = False):
+    def __init__(self, category_field = False, category_field_delimiter = False, label_field = False, compound_structure_field = False, write_structures = True, fp = "ecfp4", fingerprint_field = False, metric = "Tanimoto", pcp = False, compressed_data_format=False):
         self.category_field = category_field
         self.category_field_delimiter = category_field_delimiter
         self.label_field = label_field
@@ -66,6 +76,7 @@ class ChemSpace():
         self.metric = metric
         self.pcp = pcp
         self.sdf = False
+        self.KEYS = DATA_KEYS["default"] if not compressed_data_format else DATA_KEYS["compressed"]
 
         if self.metric not in AVAILABLE_METRICS:
             raise Exception("Metric '{}' not found in available similarity metrics: {}".format(self.metric, AVAILABLE_METRICS))
@@ -159,9 +170,9 @@ class ChemSpace():
         self.chemical_space["compounds"] = {}
 
         for key, value in self.chemical_space["points"].items():
-            for i in value["object_ids"]:
+            for i in value[self.KEYS.get("object_ids", "object_ids")]:
                 if i in id2smiles:
-                    self.chemical_space["compounds"][key] = {"smiles": id2smiles[i]}
+                    self.chemical_space["compounds"][key] = {self.KEYS.get("smiles", "smiles"): id2smiles[i]}
 
     def read_data(self, rows, header=False, missing_value=False, remove_columns=False):
         """Reads data in a form of list of lists (tuples)"""
@@ -293,17 +304,17 @@ class ChemSpace():
         self.chemical_space = {"points": {}}
 
         for index in self.index_order:
-            self.chemical_space["points"][index] = {"object_ids": [self.index2id[index]]}
+            self.chemical_space["points"][index] = {self.KEYS.get("object_ids", "object_ids"): [self.index2id[index]]}
 
         if len(self.index2category):
             self.__parse_categories__()
 
         if len(self.index2label):
             for index in self.index_order:
-                self.chemical_space["points"][index]["label"] = self.index2label[index]
+                self.chemical_space["points"][index][self.KEYS.get("label", "label")] = self.index2label[index]
         
         for index in self.index_order:
-            self.chemical_space["points"][index]["features"] = copy.copy(self.index2row[index])
+            self.chemical_space["points"][index][self.KEYS.get("features", "features")] = copy.copy(self.index2row[index])
 
         if self.header:
             current_header = self.chemical_space.get("feature_names", [])
@@ -315,7 +326,7 @@ class ChemSpace():
 
             for index, rdmol in self.index2rdmol.items():
                 if rdmol is not None:
-                    self.chemical_space["compounds"][index] = {"smiles": Chem.MolToSmiles(rdmol, True)}
+                    self.chemical_space["compounds"][index] = {self.KEYS.get("smiles", "smiles"): Chem.MolToSmiles(rdmol, True)}
 
     def __parse_categories__(self):
         category2ids = {}
@@ -333,7 +344,7 @@ class ChemSpace():
             self.chemical_space["categories"] = []
 
         for c, ids in category2ids.items():
-            self.chemical_space["categories"].append({"label": c, "objects": list(ids)})
+            self.chemical_space["categories"].append({self.KEYS.get("label", "label"): c, "objects": list(ids)})
 
     def add_paths(self, paths):
         if not self.chemical_space.get("paths", False):
@@ -367,7 +378,7 @@ class ChemSpace():
                 else:
                     pcps = empty
                 
-                self.chemical_space["points"][index]["features"].extend(pcps)
+                self.chemical_space["points"][index][self.KEYS.get("features", "features")].extend(pcps)
                 self.data[i].extend(pcps)                
 
             current_header = self.chemical_space.get("feature_names", [])
@@ -662,10 +673,10 @@ class ChemSpace():
 
             for index, values in self.chemical_space["points"].items():
                 if index in index2coords:
-                    point_features = self.chemical_space["points"][index]["features"]
+                    point_features = self.chemical_space["points"][index][self.KEYS.get("features", "features")]
                     features = [round(index2coords[index][0], 3), round(index2coords[index][1], 3)]
                     features.extend(point_features)
-                    self.chemical_space["points"][index]["features"] = features
+                    self.chemical_space["points"][index][self.KEYS.get("features", "features")] = features
 
                 else:
                     self.chemical_space["points"].pop(index, None)
@@ -719,21 +730,19 @@ class ChemSpace():
         for index, scaffold in self.index2scaffold.items():
             print(self.scaffold2indexes[scaffold])
             self.chemical_space["points"][index] = {
-                # "features": self.__get_pcp_for_rdmol__(self.scaffold2rdmol[scaffold]),
-                # "object_ids": self.scaffold2indexes[scaffold],
-                "object_ids": [index],
+                self.KEYS.get("object_ids", "object_ids"): [index],
                 "links": [[x, 1] for x in self.scaffold2indexes[scaffold]],
-                "label": "Scaffold {}".format(index-len(self.data)+1),
-                "features": []
+                self.KEYS.get("label", "label"): "Scaffold {}".format(index-len(self.data)+1),
+                self.KEYS.get("features", "features"): []
             }
             
             for i, f in enumerate(self.chemical_space["feature_names"]):
-                values = [self.chemical_space["points"][x]["features"][i] for x in self.scaffold2indexes[scaffold]]
+                values = [self.chemical_space["points"][x][self.KEYS.get("features", "features")][i] for x in self.scaffold2indexes[scaffold]]
                 values = [v for v in values if v is not None]
                 value = round(np.mean(values), 2) if len(values) else None
-                self.chemical_space["points"][index]["features"].append(value)
+                self.chemical_space["points"][index][self.KEYS.get("features", "features")].append(value)
 
-            self.chemical_space["compounds"][index] = {"smiles": scaffold, "color": "red"}
+            self.chemical_space["compounds"][index] = {self.KEYS.get("smiles", "smiles"): scaffold, "color": "red"}
 
         if self.add_scaffolds_category:
             if not self.chemical_space.get("categories", False):
@@ -825,7 +834,8 @@ def _process_(arguments):
         label_field = arguments.label_field,
         compound_structure_field = arguments.compound_structure_field,
         fingerprint_field = arguments.fingerprint_field,
-        metric = arguments.similarity_metric
+        metric = arguments.similarity_metric,
+        compressed_data_format=arguments.compressed_data_format
     )
 
     if arguments.data_file.split(".")[-1].lower() == "sdf":
@@ -887,6 +897,7 @@ if __name__ == '__main__':
     parser.add_argument("-knn", "--knn", type=int, default=None, help="the number of neighbours (k) used for the construction of csn using the nn method")
     parser.add_argument("-sm", "--similarity_metric", type=str, default="Tanimoto", help="similarity metric")
     parser.add_argument('-rmc','--remove_columns', nargs='+', default=False, help='columns in data that should not be used')
+    parser.add_argument('-cdf','--compressed_data_format', nargs='+', default=False, help='use shorter data keys')
     
     args = parser.parse_args()
     _process_(args)

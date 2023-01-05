@@ -471,11 +471,11 @@ var _date = new Date();
 
         "redraw_button": $('<div class="redraw_button">Redraw</div>')
           .css({
-            "padding": 5,
+            "padding": "0.5rem",
             "color": "white",
-            "border": "solid #D2D2D2 1px",
-            "margin": "5px 0px",
-            "background-color": "#2171b5",
+            "border-radius": "2px",
+            "margin": "0.5rem 0rem",
+            "background-color": "#333",
             "font-weight": "bold",
             "text-align": "center",
           }),
@@ -500,7 +500,7 @@ var _date = new Date();
                 var coords = self.point2coord[objects[0]];
                 var object_ids = self.point_index[coords[0]][coords[1]];
                 var object_id = objects[0];
-                var label = self.data.points[object_id].label;
+                var label = self.data.points[object_id][self.keys.label];
                 label = $("<div><div>" + ((label === undefined)?object_id:label) + "</div></div>").css({"display": "flex", "align-items": "center"});
                 var point_data = self._get_points_data(object_ids);     
                 
@@ -635,6 +635,21 @@ var _date = new Date();
           self.shapes_ref[key] = new Konva.RegularPolygon(shape_settings);
         }
       };
+
+      self.keys = {
+        "default": {
+          "object_ids": "object_ids",
+          "label": "label",
+          "smiles": "smiles",
+          "features": "features",
+        },
+        "compressed":{
+          "object_ids": "o",
+          "label": "l",
+          "smiles": "s",
+          "features": "f",
+        }
+      }
 
       self.objects_ref = {
           "path": new Konva.Line({
@@ -798,15 +813,27 @@ var _date = new Date();
   ChemSpace.prototype.read_data = function(json){
       var self = this;
       self.data = json;
+      console.log(self.data)
 
       self.point_ids = Object.keys(self.data.points);
       self.points_len = self.point_ids.length;
+
+      if(self.points_len > 0){
+        if(self.data.points[0]["o"] !== undefined){
+          self.keys = self.keys.compressed;
+        }
+        else{
+          self.keys = self.keys.default;
+        }
+
+      }
+
       self.object_id2points = {};
 
       for(var i = 0, len=self.points_len; i<len; i++){
         var point_id = self.point_ids[i];
-        for(var j = 0, len_j=self.data.points[point_id].object_ids.length; j<len_j; j++){
-          var object_id=self.data.points[point_id].object_ids[j];
+        for(var j = 0, len_j=self.data.points[point_id][self.keys.object_ids].length; j<len_j; j++){
+          var object_id=self.data.points[point_id][self.keys.object_ids][j];
           if(self.object_id2points[object_id] === undefined){
             self.object_id2points[object_id] = [];
           }
@@ -818,12 +845,12 @@ var _date = new Date();
 
       self._get_links_feature();
 
-      if(self.settings.compounds.draw && self.data.compounds === undefined){
+      if(self.settings.compounds.draw && self.fetch_smiles === undefined){
           self.settings.compounds.draw = false;
       }
 
       var point = self.data.points[self.point_ids[0]];
-      var dims = point.features.length;
+      var dims = point[self.keys.features].length;
 
       if(self.data.feature_names === undefined){
         self.data.feature_names = [];
@@ -853,6 +880,10 @@ var _date = new Date();
           async: false
       });
   }
+
+  /*ChemSpace.prototype.fetch_smiles = function(){
+    return false;
+  }*/  
 
   ChemSpace.prototype._add_prefix_to_data = function(data){
     var self = this;
@@ -910,7 +941,7 @@ var _date = new Date();
     else{
         for(var i = 0, len = self.points_len; i < len; i++){
             var point_id = self.point_ids[i];
-            var object_ids = self.data.points[point_id].object_ids;
+            var object_ids = self.data.points[point_id][self.keys.object_ids];
             var values = [];
             var total = 0;
             
@@ -922,15 +953,13 @@ var _date = new Date();
             }
 
             if(values.length == 1){
-                console.log(self.data.points[point_id].features);
-                self.data.points[point_id].features.push(values[0]);
-                console.log(self.data.points[point_id].features);
+                self.data.points[point_id][self.keys.features].push(values[0]);
             }
             else if(values.length > 1){
-                self.data.points[point_id].features.push(self._hack_round(total/values.length));
+                self.data.points[point_id][self.keys.features].push(self._hack_round(total/values.length));
             }
             else{
-                self.data.points[point_id].features.push(null);
+                self.data.points[point_id][self.keys.features].push(null);
             }
         }
         self.data.feature_names.push(feature.name);
@@ -957,7 +986,7 @@ var _date = new Date();
 
       for(var i = 0, len = self.points_len; i < len; i++){
         var point_id = self.point_ids[i];
-        self.data.points[point_id].features.splice(f_index, 1);
+        self.data.points[point_id][self.keys.features].splice(f_index, 1);
       }
 
       self.target_element.find(".navigation select option[value='" + f_index + "']").remove();
@@ -1402,11 +1431,11 @@ var _date = new Date();
               self.point2id[point_id] = category2data[category_id].id;
 
               if(self.settings.color.index != "category"){
-                category2data[category_id].color.push(self.data.points[point_id].features[self.settings.color.index]);
+                category2data[category_id].color.push(self.data.points[point_id][self.keys.features][self.settings.color.index]);
               }
 
               if(self.settings.point_size.index != "category"){
-                category2data[category_id].radius.push(self.data.points[point_id].features[self.settings.point_size.index]);
+                category2data[category_id].radius.push(self.data.points[point_id][self.keys.features][self.settings.point_size.index]);
               }
             }
           }
@@ -1633,7 +1662,7 @@ var _date = new Date();
         if(self.link_count > 0){
           for(var i = 0, len = self.points_len; i < len; i++){
             p1 = self.point_ids[i];
-            self.data.points[p1].features.push(point2count[p1]);
+            self.data.points[p1][self.keys.features].push(point2count[p1]);
           }
           self.data.feature_names.push("Link count [internal]");
         }
@@ -1678,15 +1707,14 @@ var _date = new Date();
         self.target_element.append($("<div class='chemspacejs-navigation_div'></div>")
             .css({
                 "position": "absolute",
-                "top": 0,
+                "top": self.header_height - 70,
                 "right": self.right_margin,
-                "height": self.header_height,
                 "max-width": self.stage.getWidth() - self.left_margin - self.right_margin,
                 "z-index": 10,
-                "display": "flex",
-                "justify-content": "flex-end",
-                "align-items": "flex-end",
-                "font-size": "80%"
+                "display": "grid",
+                "grid-template-columns": "auto auto",
+                "font-size": "0.8rem",
+                "gap": "0.5rem"
             })
         );
 
@@ -1703,11 +1731,11 @@ var _date = new Date();
       
       if((Number.isInteger(settings.index) && settings.index !== "category")||property == "link_width"){
         var menu_div = $("<div data-property='" + property + "'></div>")
-            .css({"border-right": "solid #D2D2D2 1px", "border-left": "solid #D2D2D2 1px", "display": "flex", "flex-direction": "column", "align-items": "center", "padding": "5px 8px 0px 8px", "margin-bottom": 5, "order": self._settings[property].order});
+            .css({"display": "flex", "flex-direction": "column", "align-items": "center", "padding": "5px 8px 0px 8px", "order": self._settings[property].order});
         var label = $("<div class='chemspacejs-label'>" + ((property === "link_width")?"Edge width":self.data.feature_names[self.settings[property].index]) +"</div>")
             .css({"font-weight": "bold"});
         menu_div.append(label);
-        var values_div = $("<div></div>").css({"display": "flex", "justify-content": "space-between", "align-items": "center", "width": "100%", "font-size": "90%"});
+        var values_div = $("<div></div>").css({"display": "flex", "justify-content": "space-between", "align-items": "center", "width": "100%", "font-size": "0.7rem"});
         
         if(property === "color"){
             var shape_div = $("<div class='chemspacejs-shape_div'></div>")
@@ -2305,7 +2333,7 @@ var _date = new Date();
   ChemSpace.prototype.get_data_for_point = function(point_id){
     var self = this;
     var data = self.data.points[point_id];
-    data.smiles = (self.data.compounds[point_id] !== undefined)?self.data.compounds[point_id].smiles:null;
+    data[self.keys.smiles] = (self.data.compounds[point_id] !== undefined)?self.data.compounds[point_id][self.keys.smiles]:null;
     data.color = self._id2object[self.point2id[point_id]].attrs.fill;
     return data;
   }
@@ -2341,7 +2369,7 @@ var _date = new Date();
     var y_index = self.settings.coordinates.y;
     
     for(var i = 0, len=point_ids.length; i<len; i++){
-        item_data = data[point_ids[i]].features;
+        item_data = data[point_ids[i]][self.keys.features];
         xs.push(item_data[x_index]);
         ys.push(item_data[y_index]);
     };
@@ -2379,7 +2407,7 @@ var _date = new Date();
     
       for(var i = 0, len = point_ids.length; i < len; i++){
         key = point_ids[i];
-        coord = data[key].features;
+        coord = data[key][self.keys.features];
 
         x_coord = width*(coord[x_index]-min_x)/(max_x-min_x);
         x_point_index = origin_x + (x_coord/x_part << 0)*x_part+x_shift;
@@ -2419,7 +2447,7 @@ var _date = new Date();
 
           for(let p = 0, p_len=point_count; p<p_len; p++){
             let point_id = point_ids[p];
-            self.data.points[point_id].features[point_count_index] = point_count;
+            self.data.points[point_id][self.keys.features][point_count_index] = point_count;
           }
         }
     }
@@ -2578,7 +2606,7 @@ var _date = new Date();
     var object_ids = [];
 
     for(var i = 0, len = point_ids.length; i<len; i++){
-      object_ids = object_ids.concat(self.data.points[point_ids[i]].object_ids);
+      object_ids = object_ids.concat(self.data.points[point_ids[i]][self.keys.object_ids]);
     }
     
     self.events.point_click(object_ids, evt);
@@ -2613,7 +2641,7 @@ var _date = new Date();
     var self = this;
 
     if(point_ids.length == 1){
-      var point_data = self.data.points[point_ids[0]].features;
+      var point_data = self.data.points[point_ids[0]][self.keys.features];
     }
     else{
       var point_data = [];
@@ -2623,7 +2651,7 @@ var _date = new Date();
         var values = [];
 
         for(var j = 0; j<pids_len; j++){
-          values.push(self.data.points[point_ids[j]].features[i]);
+          values.push(self.data.points[point_ids[j]][self.keys.features][i]);
         }
         values.sort(self._sort_number_ascending);
         point_data.push((values[0] !== null)?values[0] + " - " + values[pids_len-1]: "-");
@@ -3017,7 +3045,7 @@ var _date = new Date();
         else{
             var prop_index = self.settings[prop].index;
             for(var i = 0, len=keys.length; i<len; i++){
-              var value = self.data.points[keys[i]].features[prop_index];
+              var value = self.data.points[keys[i]][self.keys.features][prop_index];
               // console.log(self.data.points[keys[i]])
               if(value !== null && value !== undefined){
                 data.push(value);
@@ -3135,7 +3163,7 @@ var _date = new Date();
       coords = self.point2coord[key];
 
       if(coords[0] >= range.x[0] && coords[0] <= range.x[1] && coords[1] >= range.y[0] && coords[1] <= range.y[1]){
-        // selected = selected.concat(self.data.points[key].object_ids);
+        // selected = selected.concat(self.data.points[key][self.keys.object_ids]);
         selected.push(key);
       }
     }
@@ -3215,12 +3243,45 @@ var _date = new Date();
     self._draw_compound_structures(point_ids);
   }
 
-  ChemSpace.prototype._draw_compound_structures = function(point_ids){
+  ChemSpace.prototype._prefetch_smiles = async function(ids){
+    let self = this;
+    let to_get = [];
+    let id2object_id = {};
+    let object_id2id = {};
+
+    ids.forEach(function(id){
+      id2object_id[id] = self.data.points[id][self.keys.object_ids][0];
+      object_id2id[self.data.points[id][self.keys.object_ids][0]] = id;
+    });
+
+    if(self.data.compounds === undefined){
+      self.data.compounds = {};
+    }
+
+    ids.forEach(function(id){
+      if(self.data.compounds[id] === undefined){
+        self.data.compounds[id] = {};
+      }
+      
+      if(self.data.compounds[id][self.keys.smiles] === undefined){
+        to_get.push(id2object_id[id]);
+      }
+    });
+
+    let id2smiles = await self.fetch_smiles(to_get);
+    for (const [id, smiles] of Object.entries(id2smiles)) {
+      self.data.compounds[object_id2id[id]][self.keys.smiles] = smiles;
+    }
+    return true;
+  }  
+
+  ChemSpace.prototype._draw_compound_structures = async function(point_ids){
     var self = this;
     var structure, key, origin, img;
     var to_get = [];
     var shift = self.settings.compounds.size/2;
     var done = 0;
+    let prefetch = await self._prefetch_smiles(point_ids);
 
     for(var i = 0, keys=point_ids, len=keys.length; i<len; i++){
       key = keys[i];
@@ -3246,7 +3307,8 @@ var _date = new Date();
     if(done < to_get.length){
       for(var i = 0, len=to_get.length; i<len; i++){
         var key = to_get[i];
-        SmilesDrawer.parse(self.data.compounds[key].smiles, function (tree) {
+        
+        SmilesDrawer.parse(self.data.compounds[key][self.keys.smiles], function (tree) {
           if(self.data.compounds[key].color === undefined){
             self.smilesDrawer.draw(tree, 'chemspacejs-img_cache', 'light', false);
           }
@@ -3303,15 +3365,14 @@ var _date = new Date();
     return self.data.compounds[point_id];
   }
   
-  ChemSpace.prototype._draw_compound_in_tooltip = function(point_ids){
+  ChemSpace.prototype._draw_compound_in_tooltip = async function(point_ids){
     var self = this;
-    
+    let prefetch = await self._prefetch_smiles(point_ids);
+
     for(var i = 0, len=point_ids.length; i<len; i++){
-        SmilesDrawer.parse(self.data.compounds[point_ids[i]].smiles, function (tree) {
+        SmilesDrawer.parse(self.data.compounds[point_ids[i]][self.keys.smiles], function (tree) {
             self.tooltipSmilesDrawer.draw(tree, self.settings.target + "@tooltip_" + i, 'light', false);
         }, function (err) {
-            // console.log(err);
-
         });
     }
   };
@@ -3490,7 +3551,7 @@ var _date = new Date();
     var objects = [];
 
     for(var i = 0, len=points.length; i<len; i++){
-      objects = objects.concat(self.data.points[points[i]].object_ids);
+      objects = objects.concat(self.data.points[points[i]][self.keys.object_ids]);
     }
     return objects;
   }
