@@ -222,7 +222,7 @@ class ChemSpace():
         self.index2row = {i: [round(float(v), 2) if v not in ["", None, "None", self.missing_value] else None for v in row[1:]] for i, row in enumerate(self.data)}
         
         if len(self.index2rdmol) > 0:
-            self.index_order = self.index2rdmol.keys()
+            self.index_order = list(self.index2rdmol.keys())
             self.index_order.sort()
         else:
             self.index_order = [i for i, row in enumerate(self.data)]
@@ -541,7 +541,6 @@ class ChemSpace():
                     bitvects = True
                         
                 elif type(fps[0][1]) in [str, int] and not bitvects:
-                    print(fps)
                     self.__convert_fps_to_bitvects__(fps)
                     bitvects = True
                     
