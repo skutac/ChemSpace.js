@@ -124,7 +124,7 @@ class ChemSpace():
                 print(e)
                 not_parsed.append(index)
 
-        self.index_order = self.index2rdmol.keys()
+        self.index_order = list(self.index2rdmol.keys())
         self.index_order.sort()
         self.index2row = {i: [] for i in self.index_order}
         self.data = self.index2row.values()
@@ -517,7 +517,10 @@ class ChemSpace():
         for method in methods:
             if method == "csn_scaffolds":
                 scaffold_index_order, scaffold_index2order = self.__arrange_by_scaffolds__()
-                self.__calculate_distance_matrix__(similarity_threshold, index_order=scaffold_index_order, index2order=scaffold_index2order)
+                try:
+                    self.__calculate_distance_matrix__(similarity_threshold, index_order=scaffold_index_order, index2order=scaffold_index2order)
+                except Exception as e:
+                    print(e)
 
                 if knn is not None:
                     self.__get_edges__(similarity_threshold=similarity_threshold, knn=knn, index_order=scaffold_index_order, index2order=scaffold_index2order)
@@ -620,6 +623,7 @@ class ChemSpace():
                 feature_names = ["t-SNE1", "t-SNE2"]
                 tsne = manifold.TSNE(n_components=2, metric='precomputed')
                 coords = tsne.fit_transform(data)
+                coords = [[float(x[0]), float(x[1])] for x in coords]
 
             elif method == "umap":
                 print("\nCalculating UMAP...")
