@@ -65,7 +65,7 @@ DATA_KEYS = {
 
 class ChemSpace():
 
-    def __init__(self, category_field = False, category_field_delimiter = False, label_field = False, compound_structure_field = False, write_structures = True, fp = "ecfp4", fingerprint_field = False, metric = "Tanimoto", pcp = False, compressed_data_format=False):
+    def __init__(self, category_field = False, category_field_delimiter = False, label_field = False, compound_structure_field = False, write_structures = True, fp = "ecfp4", fingerprint_field = False, metric = "Tanimoto", pcp = False, compressed_data_format=False, round_values=False):
         self.category_field = category_field
         self.category_field_delimiter = category_field_delimiter
         self.label_field = label_field
@@ -76,6 +76,7 @@ class ChemSpace():
         self.metric = metric
         self.pcp = pcp
         self.sdf = False
+        self.round_values = round_values
         self.KEYS = DATA_KEYS["default"] if not compressed_data_format else DATA_KEYS["compressed"]
 
         if self.metric not in AVAILABLE_METRICS:
@@ -219,7 +220,10 @@ class ChemSpace():
             # remove ID field
             self.header.pop(0)
 
-        self.index2row = {i: [round(float(v), 2) if v not in ["", None, "None", self.missing_value] else None for v in row[1:]] for i, row in enumerate(self.data)}
+        if self.round_values is not False:
+            self.index2row = {i: [round(float(v), self.round_values) if v not in ["", None, "None", self.missing_value] else None for v in row[1:]] for i, row in enumerate(self.data)}
+        else:
+            self.index2row = {i: [float(v) if v not in ["", None, "None", self.missing_value] else None for v in row[1:]] for i, row in enumerate(self.data)}
         
         if len(self.index2rdmol) > 0:
             self.index_order = list(self.index2rdmol.keys())
@@ -838,7 +842,8 @@ def _process_(arguments):
         compound_structure_field = arguments.compound_structure_field,
         fingerprint_field = arguments.fingerprint_field,
         metric = arguments.similarity_metric,
-        compressed_data_format=arguments.compressed_data_format
+        compressed_data_format=arguments.compressed_data_format,
+        round_values=arguments.round_values
     )
 
     if arguments.data_file.split(".")[-1].lower() == "sdf":
@@ -901,6 +906,8 @@ if __name__ == '__main__':
     parser.add_argument("-sm", "--similarity_metric", type=str, default="Tanimoto", help="similarity metric")
     parser.add_argument('-rmc','--remove_columns', nargs='+', default=False, help='columns in data that should not be used')
     parser.add_argument('-cdf','--compressed_data_format', nargs='+', default=False, help='use shorter data keys')
+    parser.add_argument("-rv", "--round_values", type=int, default=False, help="the number of decimal places used for rounding")
+
     
     args = parser.parse_args()
     _process_(args)
