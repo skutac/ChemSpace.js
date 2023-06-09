@@ -1770,7 +1770,6 @@ var _date = new Date();
                 shape.css({"border-bottom-width": settings.scale[order[i]]});
               }
               value_div.append(shape_div.append(shape));
-
               var value = $("<div>" + ((settings.params[order[i]] === undefined||settings.value_type === "percentile")?self._prop2settings[property].values[order[i]]:settings.params[order[i]]) + "</div>")
                .css({"margin-top": 5});
               values_div.append(value_div.append(value));
