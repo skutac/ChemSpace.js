@@ -455,11 +455,13 @@ var _date = new Date();
       self.shape_events.touchend = self.shape_events.mouseout;*/
 
       self.html_ref = {
-        "tooltip": $("<div class='point_tooltip'>\
-            <div class='compound_img'><canvas></canvas></div>\
+        "tooltip": $(`<div class='point_tooltip'>\
+            <div class='compound_img' 
+              style="width: 100%; height: ${self.settings.compounds.tooltip_compound_size}; display: flex; justify-content: center;"
+            ></div>\
             <div class='point_id'></div>\
             <div class='dimensions'></div>\
-          </div>")
+          </div>`)
           .css({
             "border": "solid #D2D2D2 3px",
             "padding": 10,
@@ -512,7 +514,7 @@ var _date = new Date();
                 
                 var color = self.stage.find("#"+point_ids[i1])[0].fill();
                 var tooltip = self.html_ref.tooltip.clone();
-                tooltip.find("canvas").attr("id", self.settings.target + "@tooltip_" + i1);
+                tooltip.find(".compound_img").attr("id", self.settings.target + "_tooltip_" + i1);
 
                 tooltip.find(".point_id").html(label)
                   .css({
@@ -559,10 +561,10 @@ var _date = new Date();
         sd_space.height = self.settings.compounds.size;
         self.smilesDrawer = new SmilesDrawer.Drawer(sd_space);
 
-        var sd_tooltip = $.extend({}, self.settings.compounds.smilesDrawer);
+        /*var sd_tooltip = $.extend({}, self.settings.compounds.smilesDrawer);
         sd_tooltip.width = self.settings.compounds.tooltip_compound_size;
         sd_tooltip.height = self.settings.compounds.tooltip_compound_size;
-        self.tooltipSmilesDrawer = new SmilesDrawer.Drawer(sd_tooltip);
+        self.tooltipSmilesDrawer = new SmilesDrawer.Drawer(sd_tooltip);*/
       
       //   self.compound_img_stage = new Konva.Stage({
       //     container: self.target_element.find(".compound_img")[0],
@@ -3369,11 +3371,16 @@ var _date = new Date();
     let prefetch = await self._prefetch_smiles(point_ids);
 
     for(var i = 0, len=point_ids.length; i<len; i++){
-        SmilesDrawer.parse(self.data.compounds[point_ids[i]][self.keys.smiles], function (tree) {
-            self.tooltipSmilesDrawer.draw(tree, self.settings.target + "@tooltip_" + i, 'light', false);
-        }, function (err) {
-        });
-    }
+      let mol_target = $(`#${self.settings.target}_tooltip_${i}`);
+      
+      mol_target.append(`
+        <img data-smiles="${self.data.compounds[point_ids[i]][self.keys.smiles]}" 
+          data-smiles-options="{'width': ${self.settings.compounds.tooltip_compound_size}, 'height': ${self.settings.compounds.tooltip_compound_size}}"
+          style="width: ${self.settings.compounds.tooltip_compound_size}; height: ${self.settings.compounds.tooltip_compound_size}; border: none;"
+        />
+      `)
+    };
+    SmiDrawer.apply();
   };
 
   ChemSpace.prototype._draw_target_overlay = function(){
