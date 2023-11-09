@@ -124,6 +124,7 @@ var _date = new Date();
               "draw": true,
               "order": false,
               "off_opacity": 0.3,
+              "other_label": "other",
               "legend": {
                 "fontFamily": "Mono, sans-serif",
                 "fill": "#333333",
@@ -552,14 +553,14 @@ var _date = new Date();
 
         self.img_cache = $("#chemspacejs-img_cache");
         if(self.img_cache.length == 0){
-            self.img_cache = $("<canvas id='chemspacejs-img_cache'></canvas>").css({"position": "fixed", "top": -1000});
+            self.img_cache = $("<div id='chemspacejs-img_cache'></div>").css({"position": "fixed", "top": -1000});
         }
         $("body").append(self.img_cache);
 
-        var sd_space = $.extend({}, self.settings.compounds.smilesDrawer);
+        /*var sd_space = $.extend({}, self.settings.compounds.smilesDrawer);
         sd_space.width = self.settings.compounds.size;
         sd_space.height = self.settings.compounds.size;
-        self.smilesDrawer = new SmilesDrawer.Drawer(sd_space);
+        self.smilesDrawer = new SmilesDrawer.Drawer(sd_space);*/
 
         /*var sd_tooltip = $.extend({}, self.settings.compounds.smilesDrawer);
         sd_tooltip.width = self.settings.compounds.tooltip_compound_size;
@@ -2508,7 +2509,7 @@ var _date = new Date();
 
         if(create_other_category){
           self.category2layer[self.categories.length] = new Konva.Layer();
-          self.categories.push({"status": true, "label": "other", "color": self.settings.shapes.circle.fill, "radius": self.settings.shapes.circle.radius, "points": []});
+          self.categories.push({"status": true, "label": self.settings.categories.other_label, "color": self.settings.shapes.circle.fill, "radius": self.settings.shapes.circle.radius, "points": []});
           var other_index = self.categories.length - 1;
 
           for(var i = 0, len=self.points_len; i<len; i++){
@@ -3304,12 +3305,29 @@ var _date = new Date();
       self._update_visible_compounds();
       self.compounds_layer.draw();
     }
-
+    let body = document.getElementsByTagName("body")[0];
+    console.log(body)
     if(done < to_get.length){
+      let sd = new SmiDrawer();
       for(var i = 0, len=to_get.length; i<len; i++){
         var key = to_get[i];
+        body.append(`<img id="temp_mol_${i}" data-smiles="${self.data.compounds[point_ids[i]][self.keys.smiles]}" 
+            data-smiles-options="{'width': ${self.settings.compounds.tooltip_compound_size}, 'height': ${self.settings.compounds.tooltip_compound_size}}"
+            style="position: fixed; top: -1000; width: ${self.settings.compounds.tooltip_compound_size}; height: ${self.settings.compounds.tooltip_compound_size}; border: none;"
+          />`);
+        /*self.img_cache.html(`
+          <img id="temp_mol" data-smiles="${self.data.compounds[point_ids[i]][self.keys.smiles]}" 
+            data-smiles-options="{'width': ${self.settings.compounds.tooltip_compound_size}, 'height': ${self.settings.compounds.tooltip_compound_size}}"
+            style="width: ${self.settings.compounds.tooltip_compound_size}; height: ${self.settings.compounds.tooltip_compound_size}; border: none;"
+          />
+        `);*/
+        /*SmiDrawer.apply();*/
+        /*let done = await sd.draw(self.data.compounds[point_ids[i]][self.keys.smiles], "#chemspacejs-img_cache");
+        console.log($("#chemspacejs-img_cache img"))
+        console.log(document.getElementById("chemspacejs-img_cache"));*/
+      }
         
-        SmilesDrawer.parse(self.data.compounds[key][self.keys.smiles], function (tree) {
+        /*SmilesDrawer.parse(self.data.compounds[key][self.keys.smiles], function (tree) {
           if(self.data.compounds[key].color === undefined){
             self.smilesDrawer.draw(tree, 'chemspacejs-img_cache', 'light', false);
           }
@@ -3321,7 +3339,7 @@ var _date = new Date();
             current_smilesDrawer = new SmilesDrawer.Drawer(sd_space);
             current_smilesDrawer.draw(tree, 'chemspacejs-img_cache', 'light', false);
           }
-          var canvas = document.getElementById("chemspacejs-img_cache");
+          var mol = document.getElementById("chemspacejs-img_cache");
           var img = new Image();
           img.key = key;
           
@@ -3354,10 +3372,11 @@ var _date = new Date();
               _draw();
             }
         });
-      }
+      }*/
     }
     else{
-      _draw();
+      SmiDrawer.apply()
+      /*_draw();*/
     }
   }
 
