@@ -3,6 +3,7 @@ import csv, json, argparse, copy, re, os, requests
 import numpy as np
 from scipy.spatial import distance
 from sklearn import manifold, metrics, decomposition, preprocessing
+from sklearn.impute import SimpleImputer
 
 try:
     from umap import UMAP
@@ -291,7 +292,8 @@ class ChemSpace():
             for j, value in enumerate(row):
                 if value == self.missing_value:
                     data[i][j] = np.nan
-        imputer = preprocessing.Imputer(missing_values="NaN", strategy=datatype2impute["numeric"]["strategy"])
+
+        imputer = SimpleImputer(missing_values=np.nan, strategy=datatype2impute["numeric"]["strategy"], keep_empty_features=True)
         #error when using median strategy - minus one dimension in imputed data... omg
         imputed_data = [list(row) for row in imputer.fit_transform(self.data)]
         imputed_data = [[datatype2impute["numeric"]["value"](value) for value in row] for row in imputed_data]
