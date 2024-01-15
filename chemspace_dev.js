@@ -3394,7 +3394,7 @@ var _date = new Date();
     for(var i = 0, len=point_ids.length; i<len; i++){
       let mol_target = $(`#${self.settings.target}_tooltip_${i}`);
       
-      mol_target.append(`
+      mol_target.html(`
         <img data-smiles="${self.data.compounds[point_ids[i]][self.keys.smiles]}" 
           data-smiles-options="{'width': ${self.settings.compounds.tooltip_compound_size}, 'height': ${self.settings.compounds.tooltip_compound_size}}"
           style="width: ${self.settings.compounds.tooltip_compound_size}; height: ${self.settings.compounds.tooltip_compound_size}; border: none;"
