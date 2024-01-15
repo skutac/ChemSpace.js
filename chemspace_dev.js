@@ -550,7 +550,6 @@ var _date = new Date();
       self.target_element.append(self.html_ref.tooltip);
 
       if(self.settings.compounds.draw){
-
         self.img_cache = $("#chemspacejs-img_cache");
         if(self.img_cache.length == 0){
             self.img_cache = $("<div id='chemspacejs-img_cache'></div>").css({"position": "fixed", "top": -1000});
@@ -884,9 +883,10 @@ var _date = new Date();
       });
   }
 
-  /*ChemSpace.prototype.fetch_smiles = function(){
+  ChemSpace.prototype.fetch_smiles = function(ids){
+    console.log(ids)
     return false;
-  }*/  
+  }  
 
   ChemSpace.prototype._add_prefix_to_data = function(data){
     var self = this;
@@ -1714,8 +1714,7 @@ var _date = new Date();
                 "right": self.right_margin,
                 "max-width": self.stage.getWidth() - self.left_margin - self.right_margin,
                 "z-index": 10,
-                "display": "grid",
-                "grid-template-columns": "auto auto",
+                "display": "flex",
                 "font-size": "0.8rem",
                 "gap": "0.5rem"
             })
@@ -2678,7 +2677,6 @@ var _date = new Date();
     
     self.target_element.append(tooltip);
     self._place_tooltip(tooltip, coords, evt);
-
     if(self.settings.compounds.draw){
       self._draw_compound_in_tooltip(point_ids);
     }
@@ -3270,9 +3268,11 @@ var _date = new Date();
       }
     });
 
-    let id2smiles = await self.fetch_smiles(to_get);
-    for (const [id, smiles] of Object.entries(id2smiles)) {
-      self.data.compounds[object_id2id[id]][self.keys.smiles] = smiles;
+    if(to_get.length > 0){
+      let id2smiles = await self.fetch_smiles(to_get);
+      for (const [id, smiles] of Object.entries(id2smiles)) {
+        self.data.compounds[object_id2id[id]][self.keys.smiles] = smiles;
+      }
     }
     return true;
   }  
@@ -3311,6 +3311,7 @@ var _date = new Date();
       let sd = new SmiDrawer();
       for(var i = 0, len=to_get.length; i<len; i++){
         var key = to_get[i];
+
         body.append(`<img id="temp_mol_${i}" data-smiles="${self.data.compounds[point_ids[i]][self.keys.smiles]}" 
             data-smiles-options="{'width': ${self.settings.compounds.tooltip_compound_size}, 'height': ${self.settings.compounds.tooltip_compound_size}}"
             style="position: fixed; top: -1000; width: ${self.settings.compounds.tooltip_compound_size}; height: ${self.settings.compounds.tooltip_compound_size}; border: none;"
@@ -3328,6 +3329,7 @@ var _date = new Date();
       }
         
         /*SmilesDrawer.parse(self.data.compounds[key][self.keys.smiles], function (tree) {
+        SmilesDrawer.parse(self.data.compounds[key][self.keys.smiles], function (tree) {
           if(self.data.compounds[key].color === undefined){
             self.smilesDrawer.draw(tree, 'chemspacejs-img_cache', 'light', false);
           }

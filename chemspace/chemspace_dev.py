@@ -448,6 +448,7 @@ class ChemSpace():
             for j, index_2 in enumerate(index_order[i:], i):
                 sim = DataStructs.FingerprintSimilarity(self.index2fpobj[index_1], self.index2fpobj[index_2], metric=getattr(DataStructs, "{}Similarity".format(self.metric)))
                 dist = 1-sim
+                print(f"{index_1} - {index_2} - {fps_count}")
                 self.dist_matrix[index_1][j] = dist
                 
                 if index_1 != index_2:
@@ -554,7 +555,7 @@ class ChemSpace():
                     bitvects = True
                     
                 self.__calculate_distance_matrix__(similarity_threshold)
-                dist_matrix = np.matrix([np.array(self.dist_matrix[index]) for index in self.index_order])
+                dist_matrix = np.array([np.array(self.dist_matrix[index]) for index in self.index_order])
 
                 if knn is not None:
                     self.__get_edges__(similarity_threshold=similarity_threshold, knn=knn)
