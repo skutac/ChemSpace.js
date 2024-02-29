@@ -6,8 +6,12 @@ from sklearn import manifold, metrics, decomposition, preprocessing
 from sklearn.impute import SimpleImputer
 
 try:
-    from umap import UMAP
     from MulticoreTSNE import MulticoreTSNE
+except Exception as e:
+    print(e)
+
+try:
+    from umap import UMAP
 except Exception as e:
     print(e)
 
@@ -47,8 +51,8 @@ PROP2LABEL = {
 FP2FNC = {
     "ecfp4": lambda rdmol: AllChem.GetMorganFingerprintAsBitVect(rdmol, radius=2, nBits=1024),
     "ecfp6": lambda rdmol: AllChem.GetMorganFingerprintAsBitVect(rdmol, radius=3, nBits=1024),
-    "apfp": lambda rdmol: AllChem.GetHashedAtomPairFingerprintAsBitVect(rdmol, nBits=1024),
-    "ttfp": lambda rdmol: AllChem.GetHashedTopologicalTorsionFingerprintAsBitVect(rdmol, nBits=1024),
+    "atompairs": lambda rdmol: AllChem.GetHashedAtomPairFingerprintAsBitVect(rdmol, nBits=1024),
+    "torsion": lambda rdmol: AllChem.GetHashedTopologicalTorsionFingerprintAsBitVect(rdmol, nBits=1024),
     "maccs": lambda rdmol: AllChem.GetMACCSKeysFingerprint(rdmol),
 }
 
@@ -85,6 +89,17 @@ class ChemSpace():
 
         self.index2rdmol = {}
         self.index2fpobj = {}
+
+    def read_file(self, filename, delimiter=",", header=False, missing_value=False, remove_columns=False):
+        ext = filename.split(".")[-1].lower()
+
+        if ext in ["csv", "sdf"]:
+            if ext == "csv":
+                self.read_csv(filename, delimiter, header, missing_value, remove_columns)
+            else:
+                self.read_sdf(filename)
+        else:
+            raise Exception(f"Input file must be of type: csv, sdf. Input file: {filename}")
 
     def read_csv(self, filename, delimiter=",", header=False, missing_value=False, remove_columns=False):
         """Reads data from the CSV file"""
@@ -129,7 +144,7 @@ class ChemSpace():
         self.index_order = list(self.index2rdmol.keys())
         self.index_order.sort()
         self.index2row = {i: [] for i in self.index_order}
-        self.data = self.index2row.values()
+        self.data = list(self.index2row.values())
         
         if self.label_field is not False and self.label_field in self.index2props[self.index_order[0]]:
             self.index2label = {i: self.index2props[i].get(self.label_field) for i in self.index_order}
@@ -157,15 +172,15 @@ class ChemSpace():
         self.chemical_space["categories"].append(category)
 
 
-    def add_compounds(self, rows):
-        """Reads data in a form of list of lists (tuples)"""
-        self.compounds = {r[0]: r[1] for r in rows}
-        self.chemical_space["compounds"] = {}
-        self.__parse_compounds__()
+    # def add_compounds(self, rows):
+    #     """Reads data in a form of list of lists (tuples)"""
+    #     self.compounds = {r[0]: r[1] for r in rows}
+    #     self.chemical_space["compounds"] = {}
+    #     self.__parse_compounds__()
 
-        for key in self.chemical_space["points"]:
-            if key in self.id2rdmol:
-                self.chemical_space["compounds"][key] = {"structure": self.__get_compound__(key)}
+    #     for key in self.chemical_space["points"]:
+    #         if key in self.id2rdmol:
+    #             self.chemical_space["compounds"][key] = {"structure": self.__get_compound__(key)}
 
     def add_smiles(self, id2smiles):
         """Reads data in a form of list of lists (tuples)"""
@@ -395,29 +410,29 @@ class ChemSpace():
     def __get_pcp_for_rdmol__(self, rdmol):
         return [round(PROP2FNC[prop](rdmol), 2) for prop in PROPS_ORDER]
 
-    def __get_compound__(self, rdmol):
-        if rdmol is not None:
-            Chem.Kekulize(rdmol)
-            AllChem.Compute2DCoords(rdmol)
-            compound = {"atoms": {}}
-            atoms = [a for a in rdmol.GetAtoms()]
-            bond_types = []
-            for i, a in enumerate(atoms, 1):
-                number = a.GetIdx()
-                position = rdmol.GetConformer().GetAtomPosition(number)
+    # def __get_compound__(self, rdmol):
+    #     if rdmol is not None:
+    #         Chem.Kekulize(rdmol)
+    #         AllChem.Compute2DCoords(rdmol)
+    #         compound = {"atoms": {}}
+    #         atoms = [a for a in rdmol.GetAtoms()]
+    #         bond_types = []
+    #         for i, a in enumerate(atoms, 1):
+    #             number = a.GetIdx()
+    #             position = rdmol.GetConformer().GetAtomPosition(number)
 
-                compound["atoms"][number] = {
-                    "bonds": {b.GetEndAtomIdx():b.GetBondTypeAsDouble() for b in a.GetBonds() if b.GetEndAtomIdx() != number},
-                    "symbol": a.GetSymbol(),
-                    "charge": a.GetFormalCharge(),
-                    "coordinates": [round(position.x, 3), round(position.y, 3)]
-                }
+    #             compound["atoms"][number] = {
+    #                 "bonds": {b.GetEndAtomIdx():b.GetBondTypeAsDouble() for b in a.GetBonds() if b.GetEndAtomIdx() != number},
+    #                 "symbol": a.GetSymbol(),
+    #                 "charge": a.GetFormalCharge(),
+    #                 "coordinates": [round(position.x, 3), round(position.y, 3)]
+    #             }
 
-                bond_types.extend(compound["atoms"][number]["bonds"].values())
-        else:
-            compound = None
+    #             bond_types.extend(compound["atoms"][number]["bonds"].values())
+    #     else:
+    #         compound = None
 
-        return compound
+    #     return compound
 
     def normalize_data(self, feature_range=(0,1)):
         """Normalizes data to a scale from 0 to 1."""
@@ -448,7 +463,7 @@ class ChemSpace():
             for j, index_2 in enumerate(index_order[i:], i):
                 sim = DataStructs.FingerprintSimilarity(self.index2fpobj[index_1], self.index2fpobj[index_2], metric=getattr(DataStructs, "{}Similarity".format(self.metric)))
                 dist = 1-sim
-                print(f"{index_1} - {index_2} - {fps_count}")
+                # print(f"{index_1} - {index_2} - {fps_count}")
                 self.dist_matrix[index_1][j] = dist
                 
                 if index_1 != index_2:
@@ -457,6 +472,8 @@ class ChemSpace():
                     if sim >= similarity_threshold:
                         self.edges.append((index2order[index_1], index2order[index_2], sim))
                         self.index2edges[index_1].append([index_2, round(sim, 2)])
+
+        print(f"\nTotal edges: {len(self.edges)}")
 
     def __get_edges__(self, similarity_threshold=0.7, knn=2, index_order=None, index2order=None):
         self.edges = []
@@ -469,7 +486,7 @@ class ChemSpace():
             index2order = {x: i for i, x in enumerate(index_order)}
         
         count = len(index_order)
-        print("\nCalculating edges [similarity threshold={}]: {} compounds".format(similarity_threshold, count))
+        print(f"\nCalculating edges [similarity threshold={similarity_threshold}, knn={knn}]: {count} compounds")
 
         for i, index in enumerate(index_order):
             if (i+1)%100 == 0:
@@ -483,10 +500,10 @@ class ChemSpace():
 
             for v in values:
                 sim = 1-v[1]
+                
                 if sim >= similarity_threshold:
-                    # self.edges.append((index2order[index], index2order[v[0]]))
+                    # print(v[1], sim, similarity_threshold)
                     self.edges.append((index2order[index], index2order[v[0]], sim))
-                    # self.index2edges[index].append([v[0]])
                     self.index2edges[index].append([v[0], round(sim, 2)])
 
                     if len(self.index2edges[index]) == knn:
@@ -510,11 +527,16 @@ class ChemSpace():
         return bitvect
 
     def arrange(self, by="fps", fps=[], method="pca", similarity_threshold=0.7, add_edges=False, knn=None, add_scaffolds_category=False):
+        knn = int(knn)
+        similarity_threshold = float(similarity_threshold)
+
         self.dist_matrix = False
         bitvects = False
         self.edges = []
         self.index2edges = {}
         self.add_scaffolds_category = add_scaffolds_category
+
+        # print(by, fps, method)
 
         if type(method) is not list:
             methods = [method]
@@ -525,6 +547,7 @@ class ChemSpace():
             if method == "csn_scaffolds":
                 scaffold_index_order, scaffold_index2order = self.__arrange_by_scaffolds__()
                 try:
+                    print(method, similarity_threshold)
                     self.__calculate_distance_matrix__(similarity_threshold, index_order=scaffold_index_order, index2order=scaffold_index2order)
                 except Exception as e:
                     print(e)
@@ -637,7 +660,7 @@ class ChemSpace():
                 feature_names = ["UMAP1", "UMAP2"]
                 umap = UMAP(n_neighbors=5, min_dist=1, metric="jaccard")
                 coords = umap.fit_transform(data)
-                coords = [[float(x[0]), float(x[1])] for x in coords]
+                coords = [[float(x[0]), float(x[1])] if not np.isnan(x[0]) else [0, 0] for x in coords]
 
             # elif method == "sas":
             #     print("\nCalculating SAS...")
@@ -758,7 +781,7 @@ class ChemSpace():
             if not self.chemical_space.get("categories", False):
                 self.chemical_space["categories"] = []
 
-            self.chemical_space["categories"].append({"label": "scaffolds", "color": "gray", "points": self.index2scaffold.keys(), "shape": "circle"})
+            self.chemical_space["categories"].append({"label": "scaffolds", "color": "gray", "points": list(self.index2scaffold.keys()), "shape": "circle"})
 
     def export_chemical_space_as_html(self, htmldir=".", ):
         """Export a simple HTML page with embedded chemical space and dependencies into a given directory."""
