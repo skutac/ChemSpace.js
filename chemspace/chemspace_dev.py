@@ -536,8 +536,6 @@ class ChemSpace():
         self.index2edges = {}
         self.add_scaffolds_category = add_scaffolds_category
 
-        # print(by, fps, method)
-
         if type(method) is not list:
             methods = [method]
         else:
@@ -560,10 +558,16 @@ class ChemSpace():
                 feature_names = ["CSN1", "CSN2"]
                 self.edges.extend(self.scaffold_edges)
 
+                edges = []
+                weights = []
+                
                 for e in self.edges:
-                    g.add_edge(e[0], e[1], weight=e[2])
+                    edges.append((e[0], e[1]))
+                    weights.append(e[2])
 
-                layout = g.layout_fruchterman_reingold(weights="weight")
+                g.add_edges(edges)
+
+                layout = g.layout_fruchterman_reingold(weights=weights)
                 coords = layout.coords
 
             elif (method in ["csn", "csn_weighted", "nn", "mds"] or by == "dm") and not self.dist_matrix:
@@ -603,13 +607,19 @@ class ChemSpace():
 
                 print("Fruchterman-Reingold Layout calculation...")
 
+                edges = []
+                weights = []
+                
                 for e in self.edges:
-                    g.add_edge(e[0], e[1], weight=e[2])
+                    edges.append((e[0], e[1]))
+                    weights.append(e[2])
+
+                g.add_edges(edges)
                 
                 if method == "csn":
                     layout = g.layout_fruchterman_reingold()
                 else:
-                    layout = g.layout_fruchterman_reingold(weights="weight")
+                    layout = g.layout_fruchterman_reingold(weights=weights)
                     
                 coords = layout.coords
 
@@ -781,7 +791,12 @@ class ChemSpace():
             if not self.chemical_space.get("categories", False):
                 self.chemical_space["categories"] = []
 
-            self.chemical_space["categories"].append({"label": "scaffolds", "color": "gray", "points": list(self.index2scaffold.keys()), "shape": "circle"})
+            self.chemical_space["categories"].append({
+                self.KEYS.get("label", "label"): "scaffolds", 
+                "color": "gray", 
+                "points": list(self.index2scaffold.keys()), 
+                "shape": "circle"
+            })
 
     def export_chemical_space_as_html(self, htmldir=".", ):
         """Export a simple HTML page with embedded chemical space and dependencies into a given directory."""
