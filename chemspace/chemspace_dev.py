@@ -1,9 +1,12 @@
 import csv, json, argparse, copy, re, os, requests
+from collections import defaultdict
 
 import numpy as np
 from scipy.spatial import distance
 from sklearn import manifold, metrics, decomposition, preprocessing
 from sklearn.impute import SimpleImputer
+
+import tmap
 
 try:
     from MulticoreTSNE import MulticoreTSNE
@@ -21,10 +24,11 @@ import jsmin
 import rdkit
 from rdkit import Chem, DataStructs, Geometry
 from rdkit.DataStructs import cDataStructs
-from rdkit.Chem import Draw, AllChem, Scaffolds, Lipinski, Crippen, rdMolDescriptors, TemplateAlign
+from rdkit.Chem import Draw, AllChem, Scaffolds, Lipinski,\
+    Crippen, rdMolDescriptors, TemplateAlign, QED
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
-PROPS_ORDER = ["mw", "hba", "hbd", "rb", "rc", "arc", "logp", "tpsa"]
+PROPS_ORDER = ["mw", "hba", "hbd", "rb", "rc", "arc", "logp", "tpsa", "fcsp3", "ncc", "qed"]
         
 PROP2FNC = {
     "mw": rdMolDescriptors.CalcExactMolWt,
@@ -35,6 +39,9 @@ PROP2FNC = {
     "arc": Lipinski.NumAromaticRings,
     "logp": Crippen.MolLogP, 
     "tpsa": rdMolDescriptors.CalcTPSA,
+    "fcsp3": rdMolDescriptors.CalcFractionCSP3,
+    "ncc": lambda m: len(Chem.FindMolChiralCenters(m, includeUnassigned=True)),
+    "qed": QED.default
 }
 
 PROP2LABEL = {
@@ -45,7 +52,10 @@ PROP2LABEL = {
     "rc": "Rings",
     "arc": "Aromatic rings",
     "logp": "cLogP",
-    "tpsa": "TPSA"
+    "tpsa": "TPSA",
+    "fcsp3": "Fraction of csp3",
+    "ncc": "Chiral centers",
+    "qed": "QED",
 }
 
 FP2FNC = {
@@ -56,7 +66,67 @@ FP2FNC = {
     "maccs": lambda rdmol: AllChem.GetMACCSKeysFingerprint(rdmol),
 }
 
-AVAILABLE_METRICS = ["Tanimoto", "Dice", "Cosine", "Sokal", "Russel", "RogotGoldberg", "AllBit", "Kulczynski", "McConnaughey", "Asymmetric", "BraunBlanquet"]
+METHODS = {
+    "pca": {
+        "dm": False,
+        "edges": False,
+        "label": "Principal Components Analysis",
+        "dim_label": "PCA"
+    },
+    "mds": {
+        "dm": False,
+        "edges": False,
+        "label": "Multi-dimensional Scaling",
+        "dim_label": "MDS"
+    },
+    "umap": {
+        "dm": False,
+        "edges": False,
+        "label": "UMAP",
+        "dim_label": "UMAP"
+    },
+    "tsne": {
+        "dm": False,
+        "edges": False,
+        "label": "t-SNE",
+        "dim_label": "t-SNE"
+    },
+    "csn": {
+        "dm": True,
+        "edges": True,
+        "label": "Chemical Space Network",
+        "dim_label": "CNS"
+    },
+    "csn_scaffolds": {
+        "dm": True,
+        "edges": True,
+        "label": "Scaffold Chemical Space Network",
+        "dim_label": "Scaffold CSN"
+    },
+    "nn": {
+        "dm": True,
+        "edges": False,
+        "label": "Nearest Neighbours",
+        "dim_label": "NN"
+    },
+    "mst": {
+        "dm": True,
+        "edges": True,
+        "label": "Minimum Spanning Tree",
+        "dim_label": "MST"
+    },
+    "mst_scaffolds": {
+        "dm": True,
+        "edges": True,
+        "label": "Minimum Scaffold Spanning Tree",
+        "dim_label": "Scaffold MST"
+    },
+}
+
+AVAILABLE_METRICS = [
+    "Tanimoto", "Dice", "Cosine", "Sokal", "Russel", "RogotGoldberg", 
+    "AllBit", "Kulczynski", "McConnaughey", "Asymmetric", "BraunBlanquet"
+]
 
 DATA_KEYS = {
     "default": {},
@@ -293,11 +363,16 @@ class ChemSpace():
         return index2value
 
     def __impute_missing_values__(self, data):
-        datatype2impute = {"numeric": {"strategy":"mean", 
-                                        "value": lambda x: round(float(value), 3)}, 
-                           "binary": {"strategy":"most_frequent", 
-                                      "value": lambda x: int(value)}
-                           }
+        datatype2impute = {
+            "numeric": {
+                "strategy":"mean", 
+                "value": lambda x: round(float(value), 3)
+            }, 
+            "binary": {
+                "strategy":"most_frequent", 
+                "value": lambda x: int(value)
+            }
+        }
 
         missing_values_indexes = []
         
@@ -410,30 +485,6 @@ class ChemSpace():
     def __get_pcp_for_rdmol__(self, rdmol):
         return [round(PROP2FNC[prop](rdmol), 2) for prop in PROPS_ORDER]
 
-    # def __get_compound__(self, rdmol):
-    #     if rdmol is not None:
-    #         Chem.Kekulize(rdmol)
-    #         AllChem.Compute2DCoords(rdmol)
-    #         compound = {"atoms": {}}
-    #         atoms = [a for a in rdmol.GetAtoms()]
-    #         bond_types = []
-    #         for i, a in enumerate(atoms, 1):
-    #             number = a.GetIdx()
-    #             position = rdmol.GetConformer().GetAtomPosition(number)
-
-    #             compound["atoms"][number] = {
-    #                 "bonds": {b.GetEndAtomIdx():b.GetBondTypeAsDouble() for b in a.GetBonds() if b.GetEndAtomIdx() != number},
-    #                 "symbol": a.GetSymbol(),
-    #                 "charge": a.GetFormalCharge(),
-    #                 "coordinates": [round(position.x, 3), round(position.y, 3)]
-    #             }
-
-    #             bond_types.extend(compound["atoms"][number]["bonds"].values())
-    #     else:
-    #         compound = None
-
-    #     return compound
-
     def normalize_data(self, feature_range=(0,1)):
         """Normalizes data to a scale from 0 to 1."""
         print("Data normalization (scale): {}".format(feature_range))
@@ -463,21 +514,21 @@ class ChemSpace():
             for j, index_2 in enumerate(index_order[i:], i):
                 sim = DataStructs.FingerprintSimilarity(self.index2fpobj[index_1], self.index2fpobj[index_2], metric=getattr(DataStructs, "{}Similarity".format(self.metric)))
                 dist = 1-sim
-                # print(f"{index_1} - {index_2} - {fps_count}")
                 self.dist_matrix[index_1][j] = dist
                 
                 if index_1 != index_2:
                     self.dist_matrix[index_2][i] = dist
 
-                    if sim >= similarity_threshold:
-                        self.edges.append((index2order[index_1], index2order[index_2], sim))
-                        self.index2edges[index_1].append([index_2, round(sim, 2)])
+        #             if sim >= similarity_threshold:
+        #                 self.edges.append((index2order[index_1], index2order[index_2], sim))
+        #                 self.index2edges[index_1].append([index_2, round(sim, 2)])
 
-        print(f"\nTotal edges: {len(self.edges)}")
+        # print(f"\nTotal edges: {len(self.edges)}")
 
     def __get_edges__(self, similarity_threshold=0.7, knn=2, index_order=None, index2order=None):
         self.edges = []
-        self.index2edges = {}
+        self.edges_weights = []
+        self.index2edges = defaultdict(dict)
 
         if index_order is None:
             index_order = self.index_order
@@ -495,16 +546,13 @@ class ChemSpace():
             values = [[idx, v] for idx, v in zip(index_order, self.dist_matrix[index]) if idx != index]
             values.sort(key=lambda x: x[1])
 
-            # if 1-values[1][1] >= similarity_threshold: 
-            self.index2edges[index] = []
-
             for v in values:
                 sim = 1-v[1]
                 
                 if sim >= similarity_threshold:
-                    # print(v[1], sim, similarity_threshold)
-                    self.edges.append((index2order[index], index2order[v[0]], sim))
-                    self.index2edges[index].append([v[0], round(sim, 2)])
+                    self.edges.append((index2order[index], index2order[v[0]]))
+                    self.edges_weights.append(sim)
+                    self.index2edges[index][v[0]] = round(sim, 2)
 
                     if len(self.index2edges[index]) == knn:
                         break
@@ -526,26 +574,131 @@ class ChemSpace():
         bitvect.SetBitsFromList(on_indexes)
         return bitvect
 
-    def arrange(self, by="fps", fps=[], method="pca", similarity_threshold=0.7, add_edges=False, knn=None, add_scaffolds_category=False):
-        knn = int(knn)
-        similarity_threshold = float(similarity_threshold)
+    def __pca__(self, data, **kwargs):
+        pca = decomposition.PCA(n_components=2)
+        coords = pca.fit_transform(data)
+        return coords
 
+    def __mds__(self, data, **kwargs):
+        # sklearn implementation
+        mds = manifold.MDS(n_components=2, dissimilarity='precomputed')
+        coords = mds.fit_transform(data)
+
+        # igraph implementation
+        # layout = g.layout_mds(data, 2, arpack_options=igraph.ARPACKOptions(iter=1000))
+        # coords = layout.coords
+        return coords
+
+    def __fa__(self, data, **kwargs):
+        fa = decomposition.FactorAnalysis(n_components=2)
+        coords = fa.fit_transform(data)
+        return coords
+
+    def __isomap__(self, data, **kwargs):
+        isomap = manifold.Isomap(n_neighbors=200, n_components=2)
+        coords = isomap.fit_transform(data)
+        return coords
+
+    def __multicore_tsne__(self, data, **kwargs):
+        tsne = MulticoreTSNE(n_components=2, metric='precomputed', n_jobs=4)
+        coords = tsne.fit_transform(data)
+        return coords
+
+    def __tsne__(self, data, **kwargs):
+        tsne = manifold.TSNE(n_components=2, metric='precomputed')
+        coords = tsne.fit_transform(data)
+        coords = [[float(x[0]), float(x[1])] for x in coords]
+        return coords
+
+    def __umap__(self, data, **kwargs):
+        umap = UMAP(n_neighbors=5, min_dist=1, metric="jaccard")
+        coords = umap.fit_transform(data)
+        coords = [[float(x[0]), float(x[1])] if not np.isnan(x[0]) else [0, 0] for x in coords]
+        return coords
+
+    def __csn__(self, data, **kwargs):
+        g = igraph.Graph(len(self.index_order))
+        g.add_edges(self.edges)
+        layout = g.layout_fruchterman_reingold(weights=self.edges_weights if kwargs["weights"] else None)            
+        coords = layout.coords
+        return coords
+
+    def __csn_scaffolds__(self, data, **kwargs):
+        g = igraph.Graph(len(self.index_order))
+        edges = copy.copy(self.edges)
+        edges.extend(self.scaffold_edges)
+        g.add_edges(edges)
+        
+        edges_weights = copy.copy(self.edges_weights)
+        edges_weights.extend(self.scaffold_edges_weights)
+
+        layout = g.layout_fruchterman_reingold(weights=edges_weights if kwargs["weights"] else None)
+        coords = layout.coords
+        return coords
+
+    def __mst__(self, data, **kwargs):
+        edges = []
+
+        for i, e in enumerate(self.edges):
+            edges.append((e[0], e[1], 1 - self.edges_weights[i]))
+
+        x, y, s, t, _ = tmap.layout_from_edge_list(
+            len(data), edges, create_mst=True
+        )
+        
+        coords = list(zip(x, y))
+        index2edges = defaultdict(dict)
+        
+        for i, indexes in enumerate(zip(s, t)):
+            index2edges[indexes[0]][indexes[1]] = self.index2edges[indexes[0]][indexes[1]]
+
+        self.index2edges = index2edges
+        return coords
+
+    def __mst_scaffolds__(self, data, **kwargs):
+        edges = []
+        
+        for i, e in enumerate(self.edges):
+            edges.append((e[0], e[1], 1 - self.edges_weights[i]))
+
+        for i, e in enumerate(self.scaffold_edges):
+            edges.append((e[0], e[1], 0))
+
+        x, y, s, t, _ = tmap.layout_from_edge_list(
+            len(self.index_order), edges, create_mst=True
+        )
+
+        coords = list(zip(x, y))
+        index2edges = defaultdict(dict)
+        
+        for i, indexes in enumerate(zip(s, t)):
+            index2edges[indexes[0]][indexes[1]] = self.index2edges[indexes[0]].get(indexes[1])
+
+        self.index2edges = index2edges
+        return coords
+
+    def arrange(self, by="fps", fps=[], method="pca", similarity_threshold=0.7, add_edges=False, weights=False, knn=None, add_scaffolds_category=False):
         self.dist_matrix = False
-        bitvects = False
         self.edges = []
         self.index2edges = {}
         self.add_scaffolds_category = add_scaffolds_category
+        
+        knn = int(knn)
+        similarity_threshold = float(similarity_threshold)
+        bitvects = False
+        scaffolds_index_order = False
 
         if type(method) is not list:
             methods = [method]
         else:
             methods = method
-
+        
         for method in methods:
-            if method == "csn_scaffolds":
+            
+            if "scaffolds" in method in  ["csn_scaffolds", "mst_scaffolds"] and scaffolds_index_order is False:
                 scaffold_index_order, scaffold_index2order = self.__arrange_by_scaffolds__()
+                
                 try:
-                    print(method, similarity_threshold)
                     self.__calculate_distance_matrix__(similarity_threshold, index_order=scaffold_index_order, index2order=scaffold_index2order)
                 except Exception as e:
                     print(e)
@@ -553,28 +706,14 @@ class ChemSpace():
                 if knn is not None:
                     self.__get_edges__(similarity_threshold=similarity_threshold, knn=knn, index_order=scaffold_index_order, index2order=scaffold_index2order)
 
-                g = igraph.Graph(len(self.index_order))
-                print("\nCalculating Chemical Space Network...")
-                feature_names = ["CSN1", "CSN2"]
-                self.edges.extend(self.scaffold_edges)
+                data = self.data
 
-                edges = []
-                weights = []
-                
-                for e in self.edges:
-                    edges.append((e[0], e[1]))
-                    weights.append(e[2])
+            elif (by == "dm" or METHODS[method]["dm"]) and self.dist_matrix is False:
 
-                g.add_edges(edges)
-
-                layout = g.layout_fruchterman_reingold(weights=weights)
-                coords = layout.coords
-
-            elif (method in ["csn", "csn_weighted", "nn", "mds"] or by == "dm") and not self.dist_matrix:
-                
                 if len(fps) == 0:
                     for index in self.index_order:
                         fps.append(self.index2fpobj[index])
+                    
                     bitvects = True
                         
                 elif type(fps[0][1]) in [str, int] and not bitvects:
@@ -582,11 +721,11 @@ class ChemSpace():
                     bitvects = True
                     
                 self.__calculate_distance_matrix__(similarity_threshold)
-                dist_matrix = np.array([np.array(self.dist_matrix[index]) for index in self.index_order])
 
                 if knn is not None:
                     self.__get_edges__(similarity_threshold=similarity_threshold, knn=knn)
 
+                dist_matrix = np.array([np.array(self.dist_matrix[index]) for index in self.index_order])
                 data = dist_matrix
                 by = "dm"
 
@@ -598,106 +737,15 @@ class ChemSpace():
                     
                     data = [[int(b) for b in fp] for fp in fps]
                 else:
-                    data = self.data            
+                    data = self.data
 
-            if method in ["csn", "csn_weighted"]:
-                g = igraph.Graph(len(self.index_order))
-                print("\nCalculating Chemical Space Network...")
-                feature_names = ["CSN1", "CSN2"]                    
+            print(f"Calculating {METHODS[method]['label']}...")
+            feature_names = [f"{METHODS[method]['dim_label']} {i}" for i in [1, 2]]
+            coords = getattr(self, f"__{method}__")(data, weights=weights)            
 
-                print("Fruchterman-Reingold Layout calculation...")
-
-                edges = []
-                weights = []
-                
-                for e in self.edges:
-                    edges.append((e[0], e[1]))
-                    weights.append(e[2])
-
-                g.add_edges(edges)
-                
-                if method == "csn":
-                    layout = g.layout_fruchterman_reingold()
-                else:
-                    layout = g.layout_fruchterman_reingold(weights=weights)
-                    
-                coords = layout.coords
-
-            elif method == "mds":
-                print("\nCalculating MDS...")
-                feature_names = ["MDS1", "MDS2"]
-                # sklearn implementation
-                mds = manifold.MDS(n_components=2, dissimilarity='precomputed')
-                coords = mds.fit_transform(data)
-
-                # igraph implementation
-                # layout = g.layout_mds(data, 2, arpack_options=igraph.ARPACKOptions(iter=1000))
-                # coords = layout.coords
-
-            elif method == "pca":
-                print("\nCalculating PCA...")
-                feature_names = ["PC1", "PC2"]
-                pca = decomposition.PCA(n_components=2)
-                coords = pca.fit_transform(data)
-
-            elif method == "fa":
-                print("\nCalculating Factor Analysis...")
-                feature_names = ["FA1", "FA2"]
-                fa = decomposition.FactorAnalysis(n_components=2)
-                coords = fa.fit_transform(data)
-
-            elif method == "isomap":
-                print("\nCalculating Isomap...")
-                feature_names = ["Isomap1", "Isomap2"]
-                isomap = manifold.Isomap(n_neighbors=200, n_components=2)
-                coords = isomap.fit_transform(data)
-
-            elif method == "multicore_tsne":
-                print("\nCalculating Multicore t-SNE...")
-                feature_names = ["t-SNE1", "t-SNE2"]
-                tsne = MulticoreTSNE(n_components=2, metric='precomputed', n_jobs=2)
-                coords = tsne.fit_transform(data)
-
-            elif method == "tsne":
-                print("\nCalculating t-SNE...")
-                feature_names = ["t-SNE1", "t-SNE2"]
-                tsne = manifold.TSNE(n_components=2, metric='precomputed')
-                coords = tsne.fit_transform(data)
-                coords = [[float(x[0]), float(x[1])] for x in coords]
-
-            elif method == "umap":
-                print("\nCalculating UMAP...")
-                feature_names = ["UMAP1", "UMAP2"]
-                umap = UMAP(n_neighbors=5, min_dist=1, metric="jaccard")
-                coords = umap.fit_transform(data)
-                coords = [[float(x[0]), float(x[1])] if not np.isnan(x[0]) else [0, 0] for x in coords]
-
-            # elif method == "sas":
-            #     print("\nCalculating SAS...")
-            #     feature_names = ["Similarity", "Activity difference"]
-            #     self.chemical_space = {"points": {}, "feature_names": ["SALI"]}
-            #     ai = self.header.index(self.activity_field)
-            #     ids = []
-            #     coords = []
-                
-            #     for i, index_1 in enumerate(self.index_order[:-1]):
-            #         for j, index_2 in enumerate(self.index_order[i:], i):
-            #             if i != j:
-            #                 activity_diff = round(abs(float(self.data[i][ai]) - float(self.data[j][ai])), 2)
-            #                 distance = self.dist_matrix[i][j]
-            #                 distance = distance if distance > 0 else 0.01
-
-            #                 sali = round(activity_diff/distance, 2)
-            #                 coord = [round(1 - self.dist_matrix[i][j], 2), activity_diff]
-            #                 self.chemical_space["points"]["{}_{}".format(index_1, index_2)] = {"features": [sali]}
-            #                 ids.append("{}_{}".format(index_1, index_2))
-            #                 coords.append(coord)
-
-            #     self.index_order = ids
-
-            if method in ["csn", "csn_weighted", "csn_scaffolds", "nn"] or add_edges:
+            if method in ["csn", "csn_weighted", "csn_scaffolds", "mst_scaffolds", "nn"] or add_edges:
                 if self.dist_matrix is False and self.edges in [False, []]:
-                    self.__calculate_distance_matrix__()
+                    self.__calculate_distance_matrix__(similarity_threshold)
 
                 if self.edges in [False, []]:
                     if knn is None:
@@ -709,8 +757,8 @@ class ChemSpace():
                     if not self.chemical_space["points"][cid].get("links", False):
                         self.chemical_space["points"][cid]["links"] = []
 
-                    for e in es:
-                        self.chemical_space["points"][cid]["links"].append(e)
+                    for e, weight in es.items():
+                        self.chemical_space["points"][cid]["links"].append([e, weight])
 
             index2coords = {index:coords[i] for i, index in enumerate(self.index_order)}
 
@@ -760,10 +808,12 @@ class ChemSpace():
             order+=1
 
         self.scaffold_edges = []
+        self.scaffold_edges_weights = []
 
         for index_1, scaffold in self.index2scaffold.items():
             for index_2 in self.scaffold2index_orders[scaffold]:
-                self.scaffold_edges.append((index2order[index_1], index_2, 1))
+                self.scaffold_edges.append((index2order[index_1], index_2))
+                self.scaffold_edges_weights.append(1)
 
         self.__add_scaffolds_to_chemical_space__()
 
@@ -771,7 +821,7 @@ class ChemSpace():
 
     def __add_scaffolds_to_chemical_space__(self):
         for index, scaffold in self.index2scaffold.items():
-            print(self.scaffold2indexes[scaffold])
+
             self.chemical_space["points"][index] = {
                 self.KEYS.get("object_ids", "object_ids"): [index],
                 "links": [[x, 1] for x in self.scaffold2indexes[scaffold]],
@@ -952,3 +1002,27 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     _process_(args)
+
+
+# elif method == "sas":
+#     print("\nCalculating SAS...")
+#     feature_names = ["Similarity", "Activity difference"]
+#     self.chemical_space = {"points": {}, "feature_names": ["SALI"]}
+#     ai = self.header.index(self.activity_field)
+#     ids = []
+#     coords = []
+    
+#     for i, index_1 in enumerate(self.index_order[:-1]):
+#         for j, index_2 in enumerate(self.index_order[i:], i):
+#             if i != j:
+#                 activity_diff = round(abs(float(self.data[i][ai]) - float(self.data[j][ai])), 2)
+#                 distance = self.dist_matrix[i][j]
+#                 distance = distance if distance > 0 else 0.01
+
+#                 sali = round(activity_diff/distance, 2)
+#                 coord = [round(1 - self.dist_matrix[i][j], 2), activity_diff]
+#                 self.chemical_space["points"]["{}_{}".format(index_1, index_2)] = {"features": [sali]}
+#                 ids.append("{}_{}".format(index_1, index_2))
+#                 coords.append(coord)
+
+#     self.index_order = ids
