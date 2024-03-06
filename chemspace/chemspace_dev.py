@@ -1,4 +1,4 @@
-import csv, json, argparse, copy, re, os, requests
+import csv, json, argparse, copy, re, os, requests, time
 from collections import defaultdict
 
 import numpy as np
@@ -140,7 +140,12 @@ DATA_KEYS = {
 
 class ChemSpace():
 
-    def __init__(self, category_field = False, category_field_delimiter = False, label_field = False, compound_structure_field = False, write_structures = True, fp = "ecfp4", fingerprint_field = False, metric = "Tanimoto", pcp = False, compressed_data_format=False, round_values=False):
+    def __init__(
+            self, category_field = False, category_field_delimiter = False, label_field = False, 
+            compound_structure_field = False, write_structures = True, fp = "ecfp4", 
+            fingerprint_field = False, metric = "Tanimoto", pcp = False, compressed_data_format=False, 
+            round_values=False, n_jobs=1
+        ):
         self.category_field = category_field
         self.category_field_delimiter = category_field_delimiter
         self.label_field = label_field
@@ -152,6 +157,7 @@ class ChemSpace():
         self.pcp = pcp
         self.sdf = False
         self.round_values = round_values
+        self.n_jobs = n_jobs
         self.KEYS = DATA_KEYS["default"] if not compressed_data_format else DATA_KEYS["compressed"]
 
         if self.metric not in AVAILABLE_METRICS:
@@ -493,7 +499,8 @@ class ChemSpace():
         self.data = min_max_scaler.fit_transform(self.data)
         self.data = [[round(v, 3) for v in row] for row in self.data]
 
-    def __calculate_distance_matrix__(self, similarity_threshold, index_order=None, index2order=None, method=None):
+    def __calculate_distance_matrix_old__(self, similarity_threshold, index_order=None, index2order=None, method=None):
+        start = time.time()
         if index_order is None:
             index_order = self.index_order
 
@@ -516,22 +523,43 @@ class ChemSpace():
                 dist = round(1-sim, 5)
                 self.dist_matrix[index_1][j] = dist
                 
-                if index_1 != index_2:
-                    self.dist_matrix[index_2][i] = dist
+        #         if index_1 != index_2:
+        #             self.dist_matrix[index_2][i] = dist
 
-                    if sim >= similarity_threshold:
-                        self.edges.append((index2order[index_1], index2order[index_2]))
-                        self.edges_weights.append(sim)
+        #             if sim >= similarity_threshold:
+        #                 self.edges.append((index2order[index_1], index2order[index_2]))
+        #                 self.edges_weights.append(sim)
 
-                        # if method not in ["mst", "mst_scaffolds"]:
-                        self.index2edges[index_1][index_2] = round(sim, 2)
+        #                 # if method not in ["mst", "mst_scaffolds"]:
+        #                 self.index2edges[index_1][index_2] = round(sim, 2)
 
-        print(f"\nTotal edges: {len(self.edges)}")
+        # print(f"\nTotal edges: {len(self.edges)}")
+        end = time.time()
+        print("DM:", end - start)
+
+    def __calculate_distance_matrix__(self, index_order=None, index2order=None, method=None):
+        start = time.time()
+        if index_order is None:
+            index_order = self.index_order
+
+        if index2order is None:
+            index2order = {x: i for i, x in enumerate(self.index_order)}
+        
+        print("\nCalculating distance matrix: {} compounds".format(len(index_order)))
+        
+        fps = np.array([self.index2fpobj[index].ToList() for index in index_order])
+        self.dist_matrix = metrics.pairwise_distances(fps, metric='jaccard', n_jobs=self.n_jobs)
+        end = time.time()
+        print("DM SKLEARN:", end - start)
 
     def __get_edges__(self, similarity_threshold=0.7, knn=2, index_order=None, index2order=None, method=None):
+        start = time.time()
         self.edges = []
         self.edges_weights = []
         self.index2edges = defaultdict(dict)
+        
+        if knn is None:
+            knn = 0
 
         if index_order is None:
             index_order = self.index_order
@@ -541,48 +569,132 @@ class ChemSpace():
         
         count = len(index_order)
         print(f"\nCalculating edges [similarity threshold={similarity_threshold}, knn={knn}]: {count} compounds")
+        # print("DM INDEXES MATCH", len(index_order) == len(self.dist_matrix))
+        self.dist_matrix = 1 - self.dist_matrix
+        dims = len(self.dist_matrix)
 
         if similarity_threshold == 0 and knn == 0:
             print("Get all edges...")
             
-            for i, index in enumerate(index_order, 1):
+            for i, index in enumerate(index_order, 0):
                 if i%100 == 0:
                     print("{}/{}".format(i, count))
 
-                values = [[idx, v] for idx, v in zip(index_order, self.dist_matrix[index]) if idx != index]
+                if i == dims-1:
+                    break
 
-                for v in values:
-                    sim = 1-v[1]
-                    self.edges.append((index2order[index], index2order[v[0]]))
-                    self.edges_weights.append(sim)
+                self.edges.extend([(index2order[index], index2order[idx]) for idx in index_order[i+1:]])
+                self.edges_weights.extend([self.dist_matrix[i][j] for j, idx in enumerate(index_order[i+1:], i+1)])
 
-                    if method not in ["mst", "mst_scaffolds"]:
-                        self.index2edges[index][v[0]] = round(sim, 2)
-
-        else:
-            for i, index in enumerate(index_order):
-                if (i+1)%100 == 0:
+        elif knn == 0:
+            for i, index in enumerate(index_order, 0):
+                if i%100 == 0:
                     print("{}/{}".format(i, count))
 
-                values = [[idx, v] for idx, v in zip(index_order, self.dist_matrix[index]) if idx != index]
-                values.sort(key=lambda x: x[1])
+                if i == dims-1:
+                    break
 
-                for v in values:
-                    sim = 1-v[1]
+                for j, idx in enumerate(index_order[i+1:], i+1):
+                    sim = self.dist_matrix[i][j]
                     
                     if sim >= similarity_threshold:
-                        self.edges.append((index2order[index], index2order[v[0]]))
+                        self.edges.append((index2order[index], index2order[idx]))
                         self.edges_weights.append(sim)
 
-                        if method not in ["mst", "mst_scaffolds"]:
-                            self.index2edges[index][v[0]] = round(sim, 2)
+        else:
+            index2edges = defaultdict(list)
+            for i, index in enumerate(index_order, 0):
 
-                            if len(self.index2edges[index]) == knn:
-                                break
-                    else:
-                        break
+                if i%100 == 0:
+                    print("{}/{}".format(i, count))
 
+                if i == dims-1:
+                    break
+
+                for j, idx in enumerate(index_order[i+1:], i+1):
+                    sim = self.dist_matrix[i][j]
+                    
+                    if sim >= similarity_threshold:
+                        index2edges[index2order[index]].append((index2order[idx], sim))
+                        index2edges[index2order[idx]].append((index2order[index], sim))
+
+            for index, edges in index2edges.items():
+                edges.sort(key=lambda x: x[1])
+
+                self.edges.extend([(index, x[0]) for x in edges[-knn:]])
+                self.edges_weights.extend([x[1] for x in edges[-knn:]])
+                    
+        end = time.time()
+        print("GET EDGES:", end - start)
         print("EDGES: {}".format(len(self.edges)))
+    
+
+    # def __get_edges__(self, similarity_threshold=0.7, knn=2, index_order=None, index2order=None, method=None):
+    #     start = time.time()
+    #     self.edges = []
+    #     self.edges_weights = []
+    #     self.index2edges = defaultdict(dict)
+        
+    #     if knn is None:
+    #         knn = 0
+
+    #     if index_order is None:
+    #         index_order = self.index_order
+
+    #     if index2order is None:
+    #         index2order = {x: i for i, x in enumerate(index_order)}
+        
+    #     count = len(index_order)
+    #     print(f"\nCalculating edges [similarity threshold={similarity_threshold}, knn={knn}]: {count} compounds")
+    #     print(index2order)
+    #     self.dist_matrix = 1 - self.dist_matrix
+
+    #     if similarity_threshold == 0 and knn == 0:
+    #         print("Get all edges...")
+            
+    #         for i, index in enumerate(index_order, 1):
+    #             if i%100 == 0:
+    #                 print("{}/{}".format(i, count))
+    #             # print(self.dist_matrix[index])
+    #             values = [[idx, 1-v if v is not None else 0.00001] for idx, v in zip(index_order, self.dist_matrix[index]) if idx != index]
+    #             print(values)
+    #             # values = [[idx, 1-v if v is not None else 0.00001] for idx, v in zip(index_order, self.dist_matrix[index]) if idx != index]
+
+    #             self.edges.extend([(index2order[index], index2order[idx]) for idx in index_order[i:]])
+    #             self.edges_weights.extend(self.dist_matrix[index2order[index]][index2order[idx]] for idx in index_order[i:])
+
+    #             # for v in values:
+    #             #     self.edges.append((index2order[index], index2order[v[0]]))
+    #             #     self.edges_weights.append(v[1])
+    #                 # self.index2edges[index][v[0]] = round(v[1], 2)
+
+    #     else:
+    #         for i, index in enumerate(index_order):
+    #             if (i+1)%100 == 0:
+    #                 print("{}/{}".format(i, count))
+
+    #             values = [[idx, v if v is not None else 0.99999] for idx, v in zip(index_order, self.dist_matrix[index]) if idx != index]
+    #             values.sort(key=lambda x: x[1])
+
+    #             for v in values:
+    #                 sim = 1-v[1]
+    #                 print(f"VALUE: {v[1]}")
+                    
+    #                 if sim >= similarity_threshold:
+    #                     print(f"SIM: {sim}, ST: {similarity_threshold}")
+    #                     self.edges.append((index2order[index], index2order[v[0]]))
+    #                     self.edges_weights.append(sim)
+
+    #                     # if method not in ["mst", "mst_scaffolds"]:
+    #                     self.index2edges[index][v[0]] = round(sim, 2)
+    #                     print(f"KNN {knn}, COUNT: {len(self.index2edges[index])}")
+    #                     if knn > 0 and len(self.index2edges[index]) == knn:
+    #                         break
+    #                 else:
+    #                     break
+    #     end = time.time()
+    #     print("GET EDGES:", end - start)
+    #     print("EDGES: {}".format(len(self.edges)))
         
     def __convert_fps_to_bitvects__(self, fps):
         self.index2fpobj = {}
@@ -641,9 +753,17 @@ class ChemSpace():
 
     def __csn__(self, data, **kwargs):
         g = igraph.Graph(len(self.index_order))
+        print(self.edges, self.edges_weights)
         g.add_edges(self.edges)
         layout = g.layout_fruchterman_reingold(weights=self.edges_weights if kwargs["weights"] else None)            
         coords = layout.coords
+
+        for i, e in enumerate(self.edges):
+            self.index2edges[e[0]][e[1]] = round(self.edges_weights[i], 2)
+            # self.index2edges[indexes[0]][indexes[1]]
+
+        # self.index2edges = index2edges
+
         return coords
 
     def __csn_scaffolds__(self, data, **kwargs):
@@ -673,20 +793,25 @@ class ChemSpace():
         index2edges = defaultdict(dict)
         
         for i, indexes in enumerate(zip(s, t)):
-            index2edges[indexes[0]][indexes[1]] = self.index2edges[indexes[0]][indexes[1]]
+            self.index2edges[indexes[0]][indexes[1]] = round(self.dist_matrix[indexes[0]][indexes[1]], 2)
+            # self.index2edges[indexes[0]][indexes[1]]
 
-        self.index2edges = index2edges
+        # self.index2edges = index2edges
         return coords
 
     def __mst_scaffolds__(self, data, **kwargs):
         edges = []
+        scaffold_index2order = {si: i for i, si in enumerate(self.scaffold_index_order)}
         
+        print("SCAFFOLD EDGES")
         for i, e in enumerate(self.edges):
             edges.append((e[0], e[1], 1 - self.edges_weights[i]))
 
+        print("SCAFFOLD COMPOUNDS EDGES")
         for i, e in enumerate(self.scaffold_edges):
             edges.append((e[0], e[1], 0))
 
+        print("MST")
         x, y, s, t, _ = tmap.layout_from_edge_list(
             len(self.index_order), edges, create_mst=True
         )
@@ -694,19 +819,30 @@ class ChemSpace():
         coords = list(zip(x, y))
         index2edges = defaultdict(dict)
         
-        for i, indexes in enumerate(zip(s, t)):
-            index2edges[indexes[0]][indexes[1]] = self.index2edges[indexes[0]].get(indexes[1])
+        for i, ids in enumerate(zip(s, t)):
+            sid1 = scaffold_index2order.get(ids[0], False)
+            value = None
 
-        self.index2edges = index2edges
+            if sid1:
+                sid2 = scaffold_index2order.get(ids[1], False)
+
+                if sid2:
+                    value = round(self.dist_matrix[sid1][sid2], 2)
+
+            self.index2edges[ids[0]][ids[1]] = value
+            # index2edges[indexes[0]][indexes[1]] = self.index2edges[indexes[0]].get(indexes[1])
+
+        # self.index2edges = index2edges
         return coords
 
-    def arrange(self, by="fps", fps=[], method="pca", similarity_threshold=0.7, add_edges=False, weights=False, knn=None, add_scaffolds_category=False):
+    def arrange(self, by="fps", fps=[], method="pca", similarity_threshold=0.7, add_edges=None, weights=False, knn=None, add_scaffolds_category=False, only_scaffolds=False):
         self.dist_matrix = False
         self.edges = []
         self.edges_weights = []
         self.index2edges = defaultdict(dict)
         self.add_scaffolds_category = add_scaffolds_category
-        
+        self.only_scaffolds = only_scaffolds
+
         knn = int(knn)
         similarity_threshold = float(similarity_threshold)
         bitvects = False
@@ -716,30 +852,34 @@ class ChemSpace():
             methods = [method]
         else:
             methods = method
+
+        self.add_edges = add_edges
+
+        if add_edges in [None, False]:
+            self.add_edges = any([METHODS[m].get("edges", False) for m in methods])
         
         for method in methods:
             
             if "scaffolds" in method in  ["csn_scaffolds", "mst_scaffolds"] and scaffolds_index_order is False:
-                scaffold_index_order, scaffold_index2order = self.__arrange_by_scaffolds__()
+                self.scaffold_index_order, self.scaffold_index2order = self.__arrange_by_scaffolds__()
                 
                 try:
                     self.__calculate_distance_matrix__(
-                        similarity_threshold,
-                        index_order=scaffold_index_order,
-                        index2order=scaffold_index2order,
+                        index_order=self.scaffold_index_order,
+                        index2order=self.scaffold_index2order,
                         method=method
                     )
                 except Exception as e:
                     print(e)
 
-                # if knn is not None:
-                #     self.__get_edges__(
-                #         similarity_threshold=similarity_threshold,
-                #         knn=knn,
-                #         index_order=scaffold_index_order,
-                #         index2order=scaffold_index2order,
-                #         method=method
-                #     )
+                if self.add_edges:
+                    self.__get_edges__(
+                        similarity_threshold=similarity_threshold,
+                        knn=knn,
+                        index_order=self.scaffold_index_order,
+                        index2order=self.scaffold_index2order,
+                        method=method
+                    )
 
                 data = self.data
 
@@ -755,17 +895,17 @@ class ChemSpace():
                     self.__convert_fps_to_bitvects__(fps)
                     bitvects = True
                     
-                self.__calculate_distance_matrix__(similarity_threshold)
+                self.__calculate_distance_matrix__()
 
-                if knn is not None:
+                if self.add_edges:
                     self.__get_edges__(
                         similarity_threshold=similarity_threshold,
                         knn=knn,
                         method=method
                     )
 
-                dist_matrix = np.array([np.array(self.dist_matrix[index]) for index in self.index_order])
-                data = dist_matrix
+                # dist_matrix = np.array([np.array(self.dist_matrix[index]) for index in self.index_order])
+                data = self.dist_matrix
                 by = "dm"
 
             elif by in ["data", "fps"]:
@@ -782,14 +922,14 @@ class ChemSpace():
             feature_names = [f"{METHODS[method]['dim_label']} {i}" for i in [1, 2]]
             coords = getattr(self, f"__{method}__")(data, weights=weights)            
 
-            if method in ["csn", "csn_weighted", "csn_scaffolds", "mst_scaffolds", "nn"] or add_edges:
-                if self.dist_matrix is False and self.edges in [False, []]:
-                    self.__calculate_distance_matrix__(similarity_threshold)
+            if method in ["csn", "csn_weighted", "csn_scaffolds", "mst", "mst_scaffolds"] or self.add_edges:
+                # if self.dist_matrix is False and self.edges in [False, []]:
+                #     self.__calculate_distance_matrix__(similarity_threshold)
 
-                if self.edges in [False, []]:
-                    if knn is None:
-                        knn = len(self.index_order)
-                    self.__get_edges__(similarity_threshold=similarity_threshold, knn=knn)
+                # if self.edges in [False, []]:
+                #     if knn is None:
+                #         knn = len(self.index_order)
+                #     self.__get_edges__(similarity_threshold=similarity_threshold, knn=knn)
 
                 
                 for cid, es in self.index2edges.items():
@@ -859,14 +999,22 @@ class ChemSpace():
         return index_order, index2order
 
     def __add_scaffolds_to_chemical_space__(self):
+        print(self.only_scaffolds)
         for index, scaffold in self.index2scaffold.items():
 
             self.chemical_space["points"][index] = {
                 self.KEYS.get("object_ids", "object_ids"): [index],
-                "links": [[x, 1] for x in self.scaffold2indexes[scaffold]],
                 self.KEYS.get("label", "label"): "Scaffold {}".format(index-len(self.data)+1),
                 self.KEYS.get("features", "features"): []
             }
+
+            if not self.only_scaffolds:
+                self.chemical_space["points"][index]["links"] =  [[x] for x in self.scaffold2indexes[scaffold]]
+            else:
+                print("ONLY SCAFFOLDS")
+                self.chemical_space["points"][index][self.KEYS.get("object_ids", "object_ids")].extend(
+                    [self.index2id[i] for i in self.scaffold_edges[index]]
+                )
             
             for i, f in enumerate(self.chemical_space["feature_names"]):
                 values = [self.chemical_space["points"][x][self.KEYS.get("features", "features")][i] for x in self.scaffold2indexes[scaffold]]
@@ -875,7 +1023,7 @@ class ChemSpace():
                 self.chemical_space["points"][index][self.KEYS.get("features", "features")].append(value)
 
             self.chemical_space["compounds"][index] = {self.KEYS.get("smiles", "smiles"): scaffold, "color": "red"}
-
+        print("SCAFFOLDS CATEGORY")
         if self.add_scaffolds_category:
             if not self.chemical_space.get("categories", False):
                 self.chemical_space["categories"] = []
@@ -973,7 +1121,8 @@ def _process_(arguments):
         fingerprint_field = arguments.fingerprint_field,
         metric = arguments.similarity_metric,
         compressed_data_format=arguments.compressed_data_format,
-        round_values=arguments.round_values
+        round_values=arguments.round_values,
+        n_jobs=arguments.n_jobs
     )
 
     if arguments.data_file.split(".")[-1].lower() == "sdf":
@@ -1023,6 +1172,7 @@ if __name__ == '__main__':
     # parser.add_argument("-cd", "--compounds_delimiter", type=str, default=",", help="delimiter of values in compound file")
     parser.add_argument("-arr", "--arrange_by", default="data", help="arrange data by compound structures (distance matrix) or by input data (data/fps)", type=str)
     parser.add_argument("-asc", "--add_scaffolds_category", default=False, help="add scaffolds as a category (only for arrange by csn_scaffolds)", type=str)
+    parser.add_argument("-osc", "--only_scaffolds", default=False, help="add only scaffolds to chemical space, point IDs added as object IDs", type=str)
     parser.add_argument("-cst", "--compound_similarity_threshold", default=0.7, help="compound similarity threshold")
     parser.add_argument("-drm", "--dimensional_reduction_method", nargs='+', type=str, default="pca", help="which method use for dimensional reduction (pca/isomap/csn)")
     parser.add_argument("-dws", "--dont_write_structures", default=False, help="dont write structures to output file", action="store_true")
@@ -1037,6 +1187,7 @@ if __name__ == '__main__':
     parser.add_argument('-rmc','--remove_columns', nargs='+', default=False, help='columns in data that should not be used')
     parser.add_argument('-cdf','--compressed_data_format', nargs='+', default=False, help='use shorter data keys')
     parser.add_argument("-rv", "--round_values", type=int, default=False, help="the number of decimal places used for rounding")
+    parser.add_argument("-njobs", "--n_jobs", type=int, default=1, help="the number of CPUs/threads to use for distance matrix calculation")
 
     
     args = parser.parse_args()
