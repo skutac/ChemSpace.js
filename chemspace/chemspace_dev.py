@@ -807,9 +807,10 @@ class ChemSpace():
         for i, e in enumerate(self.edges):
             edges.append((e[0], e[1], 1 - self.edges_weights[i]))
 
-        print("SCAFFOLD COMPOUNDS EDGES")
-        for i, e in enumerate(self.scaffold_edges):
-            edges.append((e[0], e[1], 0))
+        if not self.only_scaffolds:
+            print("SCAFFOLD COMPOUNDS EDGES")
+            for i, e in enumerate(self.scaffold_edges):
+                edges.append((e[0], e[1], 0))
 
         print("MST")
         x, y, s, t, _ = tmap.layout_from_edge_list(
@@ -843,7 +844,9 @@ class ChemSpace():
         self.add_scaffolds_category = add_scaffolds_category
         self.only_scaffolds = only_scaffolds
 
-        knn = int(knn)
+        if knn is not None:
+            knn = int(knn)
+
         similarity_threshold = float(similarity_threshold)
         bitvects = False
         scaffolds_index_order = False
@@ -999,7 +1002,6 @@ class ChemSpace():
         return index_order, index2order
 
     def __add_scaffolds_to_chemical_space__(self):
-        print(self.only_scaffolds)
         for index, scaffold in self.index2scaffold.items():
 
             self.chemical_space["points"][index] = {
@@ -1011,19 +1013,23 @@ class ChemSpace():
             if not self.only_scaffolds:
                 self.chemical_space["points"][index]["links"] =  [[x] for x in self.scaffold2indexes[scaffold]]
             else:
-                print("ONLY SCAFFOLDS")
                 self.chemical_space["points"][index][self.KEYS.get("object_ids", "object_ids")].extend(
-                    [self.index2id[i] for i in self.scaffold_edges[index]]
+                    [self.index2id[i] for i in self.scaffold2index_orders[scaffold]]
                 )
-            
-            for i, f in enumerate(self.chemical_space["feature_names"]):
+
+            for i, f in enumerate(self.chemical_space.get("feature_names", [])):
                 values = [self.chemical_space["points"][x][self.KEYS.get("features", "features")][i] for x in self.scaffold2indexes[scaffold]]
                 values = [v for v in values if v is not None]
                 value = round(np.mean(values), 2) if len(values) else None
                 self.chemical_space["points"][index][self.KEYS.get("features", "features")].append(value)
 
             self.chemical_space["compounds"][index] = {self.KEYS.get("smiles", "smiles"): scaffold, "color": "red"}
-        print("SCAFFOLDS CATEGORY")
+            
+            if self.only_scaffolds:
+                for i in self.scaffold2index_orders[scaffold]:
+                    self.chemical_space["points"].pop(i, None)
+        
+        print(self.chemical_space["points"])
         if self.add_scaffolds_category:
             if not self.chemical_space.get("categories", False):
                 self.chemical_space["categories"] = []
@@ -1144,7 +1150,8 @@ def _process_(arguments):
             add_edges=arguments.add_edges,
             by=arguments.arrange_by,
             knn=arguments.knn,
-            add_scaffolds_category=arguments.add_scaffolds_category
+            add_scaffolds_category=arguments.add_scaffolds_category,
+            only_scaffolds=arguments.only_scaffolds
         )
     
     if arguments.html_dir:
@@ -1172,7 +1179,7 @@ if __name__ == '__main__':
     # parser.add_argument("-cd", "--compounds_delimiter", type=str, default=",", help="delimiter of values in compound file")
     parser.add_argument("-arr", "--arrange_by", default="data", help="arrange data by compound structures (distance matrix) or by input data (data/fps)", type=str)
     parser.add_argument("-asc", "--add_scaffolds_category", default=False, help="add scaffolds as a category (only for arrange by csn_scaffolds)", type=str)
-    parser.add_argument("-osc", "--only_scaffolds", default=False, help="add only scaffolds to chemical space, point IDs added as object IDs", type=str)
+    parser.add_argument("-osc", "--only_scaffolds", default=False, help="add only scaffolds to chemical space, point IDs added as object IDs", action="store_true")
     parser.add_argument("-cst", "--compound_similarity_threshold", default=0.7, help="compound similarity threshold")
     parser.add_argument("-drm", "--dimensional_reduction_method", nargs='+', type=str, default="pca", help="which method use for dimensional reduction (pca/isomap/csn)")
     parser.add_argument("-dws", "--dont_write_structures", default=False, help="dont write structures to output file", action="store_true")
