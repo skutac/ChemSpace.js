@@ -91,6 +91,12 @@ METHODS = {
         "label": "t-SNE",
         "dim_label": "t-SNE"
     },
+    "multicore_tsne": {
+        "dm": False,
+        "edges": False,
+        "label": "t-SNE",
+        "dim_label": "t-SNE"
+    },
     "csn": {
         "dm": True,
         "edges": True,
@@ -735,7 +741,7 @@ class ChemSpace():
         return coords
 
     def __multicore_tsne__(self, data, **kwargs):
-        tsne = MulticoreTSNE(n_components=2, metric='precomputed', n_jobs=4)
+        tsne = MulticoreTSNE(n_components=2, metric='precomputed', n_jobs=self.n_jobs)
         coords = tsne.fit_transform(data)
         return coords
 
@@ -760,9 +766,6 @@ class ChemSpace():
 
         for i, e in enumerate(self.edges):
             self.index2edges[e[0]][e[1]] = round(self.edges_weights[i], 2)
-            # self.index2edges[indexes[0]][indexes[1]]
-
-        # self.index2edges = index2edges
 
         return coords
 
@@ -777,6 +780,10 @@ class ChemSpace():
 
         layout = g.layout_fruchterman_reingold(weights=edges_weights if kwargs["weights"] else None)
         coords = layout.coords
+
+        for i, e in enumerate(self.edges):
+            self.index2edges[e[0]][e[1]] = round(self.edges_weights[i], 2)
+
         return coords
 
     def __mst__(self, data, **kwargs):
@@ -794,9 +801,7 @@ class ChemSpace():
         
         for i, indexes in enumerate(zip(s, t)):
             self.index2edges[indexes[0]][indexes[1]] = round(self.dist_matrix[indexes[0]][indexes[1]], 2)
-            # self.index2edges[indexes[0]][indexes[1]]
-
-        # self.index2edges = index2edges
+        
         return coords
 
     def __mst_scaffolds__(self, data, **kwargs):
@@ -831,9 +836,7 @@ class ChemSpace():
                     value = round(self.dist_matrix[sid1][sid2], 2)
 
             self.index2edges[ids[0]][ids[1]] = value
-            # index2edges[indexes[0]][indexes[1]] = self.index2edges[indexes[0]].get(indexes[1])
 
-        # self.index2edges = index2edges
         return coords
 
     def arrange(self, by="fps", fps=[], method="pca", similarity_threshold=0.7, add_edges=None, weights=False, knn=None, add_scaffolds_category=False, only_scaffolds=False):
@@ -934,7 +937,6 @@ class ChemSpace():
                 #         knn = len(self.index_order)
                 #     self.__get_edges__(similarity_threshold=similarity_threshold, knn=knn)
 
-                
                 for cid, es in self.index2edges.items():
                     if not self.chemical_space["points"][cid].get("links", False):
                         self.chemical_space["points"][cid]["links"] = []
@@ -1013,9 +1015,10 @@ class ChemSpace():
             if not self.only_scaffolds:
                 self.chemical_space["points"][index]["links"] =  [[x] for x in self.scaffold2indexes[scaffold]]
             else:
-                self.chemical_space["points"][index][self.KEYS.get("object_ids", "object_ids")].extend(
-                    [self.index2id[i] for i in self.scaffold2index_orders[scaffold]]
-                )
+                pass
+                # self.chemical_space["points"][index][self.KEYS.get("object_ids", "object_ids")].extend(
+                #     [self.index2id[i] for i in self.scaffold2index_orders[scaffold]]
+                # )
 
             for i, f in enumerate(self.chemical_space.get("feature_names", [])):
                 values = [self.chemical_space["points"][x][self.KEYS.get("features", "features")][i] for x in self.scaffold2indexes[scaffold]]
@@ -1029,7 +1032,6 @@ class ChemSpace():
                 for i in self.scaffold2index_orders[scaffold]:
                     self.chemical_space["points"].pop(i, None)
         
-        print(self.chemical_space["points"])
         if self.add_scaffolds_category:
             if not self.chemical_space.get("categories", False):
                 self.chemical_space["categories"] = []
