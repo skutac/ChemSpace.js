@@ -150,7 +150,7 @@ class ChemSpace():
             self, category_field = False, category_field_delimiter = False, label_field = False, 
             compound_structure_field = False, write_structures = True, fp = "ecfp4", 
             fingerprint_field = False, metric = "Tanimoto", pcp = False, compressed_data_format=False, 
-            round_values=False, n_jobs=1
+            round_values=False, data_as_features=True, n_jobs=1
         ):
         self.category_field = category_field
         self.category_field_delimiter = category_field_delimiter
@@ -163,11 +163,12 @@ class ChemSpace():
         self.pcp = pcp
         self.sdf = False
         self.round_values = round_values
+        self.data_as_features = data_as_features
         self.n_jobs = n_jobs
         self.KEYS = DATA_KEYS["default"] if not compressed_data_format else DATA_KEYS["compressed"]
 
-        if self.metric not in AVAILABLE_METRICS:
-            raise Exception("Metric '{}' not found in available similarity metrics: {}".format(self.metric, AVAILABLE_METRICS))
+        # if self.metric not in AVAILABLE_METRICS:
+        #     raise Exception("Metric '{}' not found in available similarity metrics: {}".format(self.metric, AVAILABLE_METRICS))
 
         self.index2rdmol = {}
         self.index2fpobj = {}
@@ -323,6 +324,7 @@ class ChemSpace():
         else:
             self.index2row = {i: [float(v) if v not in ["", None, "None", self.missing_value] else None for v in row[1:]] for i, row in enumerate(self.data)}
         
+        
         if len(self.index2rdmol) > 0:
             self.index_order = list(self.index2rdmol.keys())
             self.index_order.sort()
@@ -330,10 +332,11 @@ class ChemSpace():
             self.index_order = [i for i, row in enumerate(self.data)]
 
         self.data = [self.index2row[i] for i in self.index_order]
+        self.original_data = copy.deepcopy(self.data)
         
         if self.missing_value is not False and len(self.data[0]) > 0:
             self.data, self.missing_values_indexes = self.__impute_missing_values__(self.data)
-
+        
         self.__create_chemspace_format__()
 
     def __read_compounds__(self):
@@ -398,7 +401,7 @@ class ChemSpace():
         imputer = SimpleImputer(missing_values=np.nan, strategy=datatype2impute["numeric"]["strategy"], keep_empty_features=True)
         #error when using median strategy - minus one dimension in imputed data... omg
         imputed_data = [list(row) for row in imputer.fit_transform(self.data)]
-        imputed_data = [[datatype2impute["numeric"]["value"](value) for value in row] for row in imputed_data]
+        # imputed_data = [[datatype2impute["numeric"]["value"](value) for value in row] for row in imputed_data]
         return imputed_data, missing_values_indexes
 
     def __return_missing_values__(self, data, missing_values_indexes):
@@ -406,6 +409,7 @@ class ChemSpace():
             if indexes:
                 for index in indexes:
                     data[i][index] = None
+
         return data
 
     def __create_chemspace_format__(self):
@@ -421,10 +425,15 @@ class ChemSpace():
             for index in self.index_order:
                 self.chemical_space["points"][index][self.KEYS.get("label", "label")] = self.index2label[index]
         
-        for index in self.index_order:
-            self.chemical_space["points"][index][self.KEYS.get("features", "features")] = copy.copy(self.index2row[index])
+        if self.data_as_features:
+            for index in self.index_order:
+                self.chemical_space["points"][index][self.KEYS.get("features", "features")] = copy.copy(self.original_data[index])
 
-        if self.header:
+        else:
+            for index in self.index_order:
+                self.chemical_space["points"][index][self.KEYS.get("features", "features")] = []
+
+        if self.header and self.data_as_features:
             current_header = self.chemical_space.get("feature_names", [])
             current_header.extend(self.header)
             self.chemical_space["feature_names"] = current_header
@@ -487,12 +496,12 @@ class ChemSpace():
                     pcps = empty
                 
                 self.chemical_space["points"][index][self.KEYS.get("features", "features")].extend(pcps)
-                self.data[i].extend(pcps)                
+                # self.data[i].extend(pcps)                
 
             current_header = self.chemical_space.get("feature_names", [])
             current_header.extend([PROP2LABEL[prop] for prop in PROPS_ORDER])
             self.chemical_space["feature_names"] = current_header
-            self.original_data = copy.deepcopy(self.data)
+            # self.original_data = copy.deepcopy(self.data)
 
     def __get_pcp_for_rdmol__(self, rdmol):
         return [round(PROP2FNC[prop](rdmol), 2) for prop in PROPS_ORDER]
@@ -505,44 +514,6 @@ class ChemSpace():
         self.data = min_max_scaler.fit_transform(self.data)
         self.data = [[round(v, 3) for v in row] for row in self.data]
 
-    def __calculate_distance_matrix_old__(self, similarity_threshold, index_order=None, index2order=None, method=None):
-        start = time.time()
-        if index_order is None:
-            index_order = self.index_order
-
-        if index2order is None:
-            index2order = {x: i for i, x in enumerate(self.index_order)}
-        
-        print("\nCalculating distance matrix: {} compounds".format(len(index_order)))
-        empty = [None for x in index_order]
-        self.dist_matrix = {x:copy.copy(empty) for x in index_order}
-        fps_count = len(index_order)
-        
-        for i, index_1 in enumerate(index_order):
-            # self.index2edges[index_1] = []
-
-            if i%100 == 0 or i == fps_count:
-                print("{}/{}".format(i, fps_count))
-            
-            for j, index_2 in enumerate(index_order[i:], i):
-                sim = DataStructs.FingerprintSimilarity(self.index2fpobj[index_1], self.index2fpobj[index_2], metric=getattr(DataStructs, "{}Similarity".format(self.metric)))
-                dist = round(1-sim, 5)
-                self.dist_matrix[index_1][j] = dist
-                
-        #         if index_1 != index_2:
-        #             self.dist_matrix[index_2][i] = dist
-
-        #             if sim >= similarity_threshold:
-        #                 self.edges.append((index2order[index_1], index2order[index_2]))
-        #                 self.edges_weights.append(sim)
-
-        #                 # if method not in ["mst", "mst_scaffolds"]:
-        #                 self.index2edges[index_1][index_2] = round(sim, 2)
-
-        # print(f"\nTotal edges: {len(self.edges)}")
-        end = time.time()
-        print("DM:", end - start)
-
     def __calculate_distance_matrix__(self, index_order=None, index2order=None, method=None):
         start = time.time()
         if index_order is None:
@@ -554,7 +525,7 @@ class ChemSpace():
         print("\nCalculating distance matrix: {} compounds".format(len(index_order)))
         
         fps = np.array([self.index2fpobj[index].ToList() for index in index_order])
-        self.dist_matrix = metrics.pairwise_distances(fps, metric='jaccard', n_jobs=self.n_jobs)
+        self.dist_matrix = metrics.pairwise_distances(fps, metric=self.metric, n_jobs=self.n_jobs)
         end = time.time()
         print("DM SKLEARN:", end - start)
 
@@ -633,74 +604,6 @@ class ChemSpace():
         end = time.time()
         print("GET EDGES:", end - start)
         print("EDGES: {}".format(len(self.edges)))
-    
-
-    # def __get_edges__(self, similarity_threshold=0.7, knn=2, index_order=None, index2order=None, method=None):
-    #     start = time.time()
-    #     self.edges = []
-    #     self.edges_weights = []
-    #     self.index2edges = defaultdict(dict)
-        
-    #     if knn is None:
-    #         knn = 0
-
-    #     if index_order is None:
-    #         index_order = self.index_order
-
-    #     if index2order is None:
-    #         index2order = {x: i for i, x in enumerate(index_order)}
-        
-    #     count = len(index_order)
-    #     print(f"\nCalculating edges [similarity threshold={similarity_threshold}, knn={knn}]: {count} compounds")
-    #     print(index2order)
-    #     self.dist_matrix = 1 - self.dist_matrix
-
-    #     if similarity_threshold == 0 and knn == 0:
-    #         print("Get all edges...")
-            
-    #         for i, index in enumerate(index_order, 1):
-    #             if i%100 == 0:
-    #                 print("{}/{}".format(i, count))
-    #             # print(self.dist_matrix[index])
-    #             values = [[idx, 1-v if v is not None else 0.00001] for idx, v in zip(index_order, self.dist_matrix[index]) if idx != index]
-    #             print(values)
-    #             # values = [[idx, 1-v if v is not None else 0.00001] for idx, v in zip(index_order, self.dist_matrix[index]) if idx != index]
-
-    #             self.edges.extend([(index2order[index], index2order[idx]) for idx in index_order[i:]])
-    #             self.edges_weights.extend(self.dist_matrix[index2order[index]][index2order[idx]] for idx in index_order[i:])
-
-    #             # for v in values:
-    #             #     self.edges.append((index2order[index], index2order[v[0]]))
-    #             #     self.edges_weights.append(v[1])
-    #                 # self.index2edges[index][v[0]] = round(v[1], 2)
-
-    #     else:
-    #         for i, index in enumerate(index_order):
-    #             if (i+1)%100 == 0:
-    #                 print("{}/{}".format(i, count))
-
-    #             values = [[idx, v if v is not None else 0.99999] for idx, v in zip(index_order, self.dist_matrix[index]) if idx != index]
-    #             values.sort(key=lambda x: x[1])
-
-    #             for v in values:
-    #                 sim = 1-v[1]
-    #                 print(f"VALUE: {v[1]}")
-                    
-    #                 if sim >= similarity_threshold:
-    #                     print(f"SIM: {sim}, ST: {similarity_threshold}")
-    #                     self.edges.append((index2order[index], index2order[v[0]]))
-    #                     self.edges_weights.append(sim)
-
-    #                     # if method not in ["mst", "mst_scaffolds"]:
-    #                     self.index2edges[index][v[0]] = round(sim, 2)
-    #                     print(f"KNN {knn}, COUNT: {len(self.index2edges[index])}")
-    #                     if knn > 0 and len(self.index2edges[index]) == knn:
-    #                         break
-    #                 else:
-    #                     break
-    #     end = time.time()
-    #     print("GET EDGES:", end - start)
-    #     print("EDGES: {}".format(len(self.edges)))
         
     def __convert_fps_to_bitvects__(self, fps):
         self.index2fpobj = {}
@@ -807,10 +710,12 @@ class ChemSpace():
     def __mst_scaffolds__(self, data, **kwargs):
         edges = []
         scaffold_index2order = {si: i for i, si in enumerate(self.scaffold_index_order)}
+        identity2value = {0: 0.01}
         
         print("SCAFFOLD EDGES")
         for i, e in enumerate(self.edges):
-            edges.append((e[0], e[1], 1 - self.edges_weights[i]))
+            weight = 1 - self.edges_weights[i]
+            edges.append((e[0], e[1], identity2value.get(weight, weight)))
 
         if not self.only_scaffolds:
             print("SCAFFOLD COMPOUNDS EDGES")
@@ -920,9 +825,9 @@ class ChemSpace():
                         for index in self.index_order:
                             fps.append(self.index2fpobj[index])
                     
-                    data = [[int(b) for b in fp] for fp in fps]
+                    data = np.array([np.array([int(b) for b in fp]) for fp in fps])
                 else:
-                    data = self.data
+                    data = np.array([np.array(row) for row in self.data])
 
             print(f"Calculating {METHODS[method]['label']}...")
             feature_names = [f"{METHODS[method]['dim_label']} {i}" for i in [1, 2]]
@@ -949,7 +854,8 @@ class ChemSpace():
             for index, values in self.chemical_space["points"].items():
                 if index in index2coords:
                     point_features = self.chemical_space["points"][index][self.KEYS.get("features", "features")]
-                    features = [round(index2coords[index][0], 3), round(index2coords[index][1], 3)]
+                    features = [round(index2coords[index][0], 5), round(index2coords[index][1], 5)]
+                    # features = [index2coords[index][0], index2coords[index][1]]
                     features.extend(point_features)
                     self.chemical_space["points"][index][self.KEYS.get("features", "features")] = features
 
@@ -1015,10 +921,9 @@ class ChemSpace():
             if not self.only_scaffolds:
                 self.chemical_space["points"][index]["links"] =  [[x] for x in self.scaffold2indexes[scaffold]]
             else:
-                pass
-                # self.chemical_space["points"][index][self.KEYS.get("object_ids", "object_ids")].extend(
-                #     [self.index2id[i] for i in self.scaffold2index_orders[scaffold]]
-                # )
+                self.chemical_space["points"][index][self.KEYS.get("object_ids", "object_ids")].extend(
+                    [self.index2id[i] for i in self.scaffold2index_orders[scaffold]]
+                )
 
             for i, f in enumerate(self.chemical_space.get("feature_names", [])):
                 values = [self.chemical_space["points"][x][self.KEYS.get("features", "features")][i] for x in self.scaffold2indexes[scaffold]]
@@ -1032,7 +937,10 @@ class ChemSpace():
                 for i in self.scaffold2index_orders[scaffold]:
                     self.chemical_space["points"].pop(i, None)
         
-        if self.add_scaffolds_category:
+        if self.only_scaffolds and self.category_field:
+            pass
+        
+        elif self.add_scaffolds_category:
             if not self.chemical_space.get("categories", False):
                 self.chemical_space["categories"] = []
 
@@ -1042,6 +950,8 @@ class ChemSpace():
                 "points": list(self.index2scaffold.keys()), 
                 "shape": "circle"
             })
+
+
 
     def export_chemical_space_as_html(self, htmldir=".", ):
         """Export a simple HTML page with embedded chemical space and dependencies into a given directory."""
