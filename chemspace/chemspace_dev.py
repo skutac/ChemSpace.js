@@ -443,7 +443,7 @@ class ChemSpace():
 
             for index, rdmol in self.index2rdmol.items():
                 if rdmol is not None:
-                    self.chemical_space["compounds"][index] = {self.KEYS.get("smiles", "smiles"): Chem.MolToSmiles(rdmol, True)}
+                    self.chemical_space["compounds"][self.index2id[index]] = {self.KEYS.get("smiles", "smiles"): Chem.MolToSmiles(rdmol, True)}
 
     def __parse_categories__(self):
         category2ids = {}
@@ -911,10 +911,11 @@ class ChemSpace():
 
     def __add_scaffolds_to_chemical_space__(self):
         for index, scaffold in self.index2scaffold.items():
+            label = f"Scaffold {index-len(self.data)+1}"
 
             self.chemical_space["points"][index] = {
-                self.KEYS.get("object_ids", "object_ids"): [index],
-                self.KEYS.get("label", "label"): "Scaffold {}".format(index-len(self.data)+1),
+                self.KEYS.get("object_ids", "object_ids"): [label],
+                self.KEYS.get("label", "label"): label,
                 self.KEYS.get("features", "features"): []
             }
 
@@ -931,7 +932,7 @@ class ChemSpace():
                 value = round(np.mean(values), 2) if len(values) else None
                 self.chemical_space["points"][index][self.KEYS.get("features", "features")].append(value)
 
-            self.chemical_space["compounds"][index] = {self.KEYS.get("smiles", "smiles"): scaffold, "color": "red"}
+            self.chemical_space["compounds"][label] = {self.KEYS.get("smiles", "smiles"): scaffold, "color": "red"}
             
             if self.only_scaffolds:
                 for i in self.scaffold2index_orders[scaffold]:
@@ -950,7 +951,6 @@ class ChemSpace():
                 "points": list(self.index2scaffold.keys()), 
                 "shape": "circle"
             })
-
 
 
     def export_chemical_space_as_html(self, htmldir=".", ):
