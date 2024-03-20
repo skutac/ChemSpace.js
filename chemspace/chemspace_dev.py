@@ -150,7 +150,7 @@ class ChemSpace():
             self, category_field = False, category_field_delimiter = False, label_field = False, 
             compound_structure_field = False, write_structures = True, fp = "ecfp4", 
             fingerprint_field = False, metric = "Tanimoto", pcp = False, compressed_data_format=False, 
-            round_values=False, data_as_features=True, n_jobs=1
+            round_values=False, data_as_features=True, n_jobs=1, keep_unparsable_structures=False
         ):
         self.category_field = category_field
         self.category_field_delimiter = category_field_delimiter
@@ -164,6 +164,7 @@ class ChemSpace():
         self.sdf = False
         self.round_values = round_values
         self.data_as_features = data_as_features
+        self.keep_unparsable_structures = keep_unparsable_structures
         self.n_jobs = n_jobs
         self.KEYS = DATA_KEYS["default"] if not compressed_data_format else DATA_KEYS["compressed"]
 
@@ -292,6 +293,7 @@ class ChemSpace():
             self.data = self.data[1:]
 
         self.index2id = {i: row[0] for i, row in enumerate(self.data)}
+        print(len(self.index2id))
         
         if self.header:
             if remove_columns is not False and len(remove_columns) > 0:
@@ -325,7 +327,7 @@ class ChemSpace():
             self.index2row = {i: [float(v) if v not in ["", None, "None", self.missing_value] else None for v in row[1:]] for i, row in enumerate(self.data)}
         
         
-        if len(self.index2rdmol) > 0:
+        if len(self.index2rdmol) > 0 and not self.keep_unparsable_structures:
             self.index_order = list(self.index2rdmol.keys())
             self.index_order.sort()
         else:
@@ -333,6 +335,9 @@ class ChemSpace():
 
         self.data = [self.index2row[i] for i in self.index_order]
         self.original_data = copy.deepcopy(self.data)
+
+        print(len(self.original_data))
+        
         
         if self.missing_value is not False and len(self.data[0]) > 0:
             self.data, self.missing_values_indexes = self.__impute_missing_values__(self.data)
@@ -427,7 +432,7 @@ class ChemSpace():
         
         if self.data_as_features:
             for index in self.index_order:
-                self.chemical_space["points"][index][self.KEYS.get("features", "features")] = copy.copy(self.original_data[index])
+                self.chemical_space["points"][index][self.KEYS.get("features", "features")] = copy.copy(self.index2row[index])
 
         else:
             for index in self.index_order:
@@ -764,8 +769,11 @@ class ChemSpace():
         else:
             methods = method
 
-        self.add_edges = add_edges
+            if "," in methods[0]:
+                methods = [x.strip() for x in methods[0].split(",")]
 
+        self.add_edges = add_edges
+        
         if add_edges in [None, False]:
             self.add_edges = any([METHODS[m].get("edges", False) for m in methods])
         
@@ -1036,6 +1044,7 @@ def _process_(arguments):
         category_field_delimiter = arguments.category_field_delimiter,
         label_field = arguments.label_field,
         compound_structure_field = arguments.compound_structure_field,
+        keep_unparsable_structures = arguments.keep_unparsable_structures,
         fingerprint_field = arguments.fingerprint_field,
         metric = arguments.similarity_metric,
         compressed_data_format=arguments.compressed_data_format,
@@ -1086,6 +1095,7 @@ if __name__ == '__main__':
     parser.add_argument("-lf", "--label_field", type=str, default=False, help="set a label field name in case it is in the data file")
     parser.add_argument("-af", "--activity_field", type=str, default=False, help="set an activity field name in case it is in the data file")
     parser.add_argument("-csf", "--compound_structure_field", type=str, default=False, help="the name of a column with a compound structure")
+    parser.add_argument("-kus", "--keep_unparsable_structures", default=False, help="keep data even if the compound structure is not parsed", action="store_true")
     parser.add_argument("-fp", "--fingerprint", type=str, default="ecfp4", help="fingerprint used for a compound representation (ecfp4, ecfp6, maccs, topological, atom_pairs)")
     # parser.add_argument("-c", "--compounds", type=str, default=None, help="csv(text) compound file with delimited values in a form: id,smiles")
     # parser.add_argument("-cd", "--compounds_delimiter", type=str, default=",", help="delimiter of values in compound file")
@@ -1102,9 +1112,9 @@ if __name__ == '__main__':
     parser.add_argument("-n", "--normalize", default=False, help="normalize data to [0, 1] range", action="store_true")
     parser.add_argument("-mv", "--missing_values", type=str, default=False, help="define the string representating missing values in the data")
     parser.add_argument("-knn", "--knn", type=int, default=None, help="the number of neighbours (k) used for the construction of csn using the nn method")
-    parser.add_argument("-sm", "--similarity_metric", type=str, default="Tanimoto", help="similarity metric")
+    parser.add_argument("-sm", "--similarity_metric", type=str, default="jaccard", help="similarity metric")
     parser.add_argument('-rmc','--remove_columns', nargs='+', default=False, help='columns in data that should not be used')
-    parser.add_argument('-cdf','--compressed_data_format', nargs='+', default=False, help='use shorter data keys')
+    parser.add_argument('-cdf','--compressed_data_format', default=False, help='use shorter data keys', action='store_true')
     parser.add_argument("-rv", "--round_values", type=int, default=False, help="the number of decimal places used for rounding")
     parser.add_argument("-njobs", "--n_jobs", type=int, default=1, help="the number of CPUs/threads to use for distance matrix calculation")
 
