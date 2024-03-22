@@ -212,14 +212,16 @@ class ChemSpace():
 
         molsupplier = Chem.SDMolSupplier(str(filename))
         not_parsed = []
+        mi = 0
 
         for index, m in enumerate(molsupplier):
             try:
                 Chem.SanitizeMol(m)
-                self.index2rdmol[index] = m
-                self.index2fpobj[index] = FP2FNC[self.fp](m)
-                self.index2props[index] = m.GetPropsAsDict()
-                self.index2id[index] = index
+                self.index2rdmol[mi] = m
+                self.index2fpobj[mi] = FP2FNC[self.fp](m)
+                self.index2props[mi] = m.GetPropsAsDict()
+                self.index2id[mi] = mi
+                mi += 1
 
             except Exception as e:
                 print(e)
