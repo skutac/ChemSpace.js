@@ -332,14 +332,12 @@ class ChemSpace():
         if len(self.index2rdmol) > 0 and not self.keep_unparsable_structures:
             self.index_order = list(self.index2rdmol.keys())
             self.index_order.sort()
+            print(self.index_order)
         else:
             self.index_order = [i for i, row in enumerate(self.data)]
-
-        self.data = [self.index2row[i] for i in self.index_order]
-        self.original_data = copy.deepcopy(self.data)
-
-        print(len(self.original_data))
         
+        self.original_data = copy.deepcopy(list(self.index2row.values()))
+        self.data = [self.index2row[i] for i in self.index_order]
         
         if self.missing_value is not False and len(self.data[0]) > 0:
             self.data, self.missing_values_indexes = self.__impute_missing_values__(self.data)
