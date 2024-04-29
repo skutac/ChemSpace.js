@@ -294,8 +294,7 @@ class ChemSpace():
             self.header = self.data[0]
             self.data = self.data[1:]
 
-        self.index2id = {i: row[0] for i, row in enumerate(self.data)}
-        print(len(self.index2id))
+        self.index2id = {i: row[0] for i, row in enumerate(self.data)}        
         
         if self.header:
             if remove_columns is not False and len(remove_columns) > 0:
@@ -421,7 +420,7 @@ class ChemSpace():
         self.chemical_space = {"points": {}}
 
         for index in self.index_order:
-            self.chemical_space["points"][index] = {self.KEYS.get("object_ids", "object_ids"): [self.index2id[index]]}
+            self.chemical_space["points"][index] = {self.KEYS.get("object_ids", "object_ids"): self.index2id[index]}
 
         if len(self.index2category):
             self.__parse_categories__()
