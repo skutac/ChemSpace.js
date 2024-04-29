@@ -294,7 +294,7 @@ class ChemSpace():
             self.header = self.data[0]
             self.data = self.data[1:]
 
-        self.index2id = {i: row[0] for i, row in enumerate(self.data)}        
+        self.index2id = {i: row[0] for i, row in enumerate(self.data)}
         
         if self.header:
             if remove_columns is not False and len(remove_columns) > 0:
@@ -302,14 +302,17 @@ class ChemSpace():
                     self.__remove_field__(col)
 
             if self.compound_structure_field and self.compound_structure_field in self.header:
+                print("Extracting structure field")
                 self.index2compound = self.__extract_field__(self.compound_structure_field)
                 self.__read_compounds__()
 
             if self.label_field and self.label_field in self.header:
+                print("Extracting label field")
                 self.index2label = self.__extract_field__(self.label_field)
                 self.index2label = {key: val if not self.index2label.get(key, False) else self.index2label[key] for key, val in self.index2id.items()}
 
             if self.category_field and self.category_field in self.header:
+                print("Extracting category field")
                 self.index2category = self.__extract_field__(self.category_field)
 
             if self.fingerprint_field and self.fingerprint_field in self.header:
@@ -326,7 +329,6 @@ class ChemSpace():
             self.index2row = {i: [round(float(v), self.round_values) if v not in ["", None, "None", self.missing_value] else None for v in row[1:]] for i, row in enumerate(self.data)}
         else:
             self.index2row = {i: [float(v) if v not in ["", None, "None", self.missing_value] else None for v in row[1:]] for i, row in enumerate(self.data)}
-        
         
         if len(self.index2rdmol) > 0 and not self.keep_unparsable_structures:
             self.index_order = list(self.index2rdmol.keys())
