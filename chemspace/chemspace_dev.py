@@ -422,7 +422,7 @@ class ChemSpace():
         self.chemical_space = {"points": {}}
 
         for index in self.index_order:
-            self.chemical_space["points"][index] = {self.KEYS.get("object_ids", "object_ids"): self.index2id[index]}
+            self.chemical_space["points"][index] = {self.KEYS.get("object_ids", "object_ids"): [self.index2id[index]]}
 
         if len(self.index2category):
             self.__parse_categories__()
