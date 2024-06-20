@@ -661,7 +661,7 @@ class ChemSpace():
         return coords
 
     def __umap__(self, data, **kwargs):
-        umap = UMAP(n_neighbors=5, min_dist=1, metric="jaccard")
+        umap = UMAP(n_neighbors=20, min_dist=1, metric="jaccard")
         coords = umap.fit_transform(data)
         coords = [[float(x[0]), float(x[1])] if not np.isnan(x[0]) else [0, 0] for x in coords]
         return coords
