@@ -333,7 +333,6 @@ class ChemSpace():
         if len(self.index2rdmol) > 0 and not self.keep_unparsable_structures:
             self.index_order = list(self.index2rdmol.keys())
             self.index_order.sort()
-            print(self.index_order)
         else:
             self.index_order = [i for i, row in enumerate(self.data)]
         
@@ -346,6 +345,9 @@ class ChemSpace():
         self.__create_chemspace_format__()
 
     def __read_compounds__(self):
+        empty = Chem.MolFromSmiles("")
+        empty_fp = FP2FNC[self.fp](empty)
+
         for i, smi in self.index2compound.items():
             try:
                 rdmol = Chem.MolFromSmiles(smi)
@@ -355,6 +357,8 @@ class ChemSpace():
                     self.index2fpobj[i] = FP2FNC[self.fp](rdmol)
 
             except Exception as e:
+                self.index2rdmol[i] = empty
+                self.index2fpobj[i] = empty_fp
                 print(e)
 
     def __remove_field__(self, field):
@@ -455,7 +459,10 @@ class ChemSpace():
         category2ids = {}
         
         for index, category in self.index2category.items():
-            categories = [category] if self.category_field_delimiter is False else [c.strip() for c in category.split(self.category_field_delimiter)]
+            if self.category_field_delimiter is False:
+                categories = [category] 
+            else:
+                categories = [c.strip() for c in category.split(self.category_field_delimiter) if c.strip() != ""]
 
             for c in categories:
                 if c in category2ids:
