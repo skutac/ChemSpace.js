@@ -668,7 +668,12 @@ class ChemSpace():
         return coords
 
     def __umap__(self, data, **kwargs):
-        umap = UMAP(n_neighbors=20, min_dist=1, metric="jaccard")
+        print("Calculating PCA: 20 components")
+        pca = decomposition.PCA(n_components=20)
+        data = pca.fit_transform(data)
+
+        # umap = UMAP(n_neighbors=20, min_dist=1, metric="jaccard")
+        umap = UMAP(n_neighbors=20, min_dist=1, metric="euclidean")
         coords = umap.fit_transform(data)
         coords = [[float(x[0]), float(x[1])] if not np.isnan(x[0]) else [0, 0] for x in coords]
         return coords
