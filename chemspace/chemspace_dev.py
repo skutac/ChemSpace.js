@@ -426,7 +426,7 @@ class ChemSpace():
         self.chemical_space = {"points": {}}
 
         for index in self.index_order:
-            self.chemical_space["points"][index] = {self.KEYS.get("object_ids", "object_ids"): [self.index2id[index]]}
+            self.chemical_space["points"][index] = {self.KEYS.get("object_ids", "object_ids"): [str(self.index2id[index])]}
 
         if len(self.index2category):
             self._parse_categories()
@@ -946,7 +946,7 @@ class ChemSpace():
                 self.chemical_space["points"][index]["links"] =  [[x] for x in self.scaffold2indexes[scaffold]]
             else:
                 self.chemical_space["points"][index][self.KEYS.get("object_ids", "object_ids")].extend(
-                    [self.index2id[i] for i in self.scaffold2index_orders[scaffold]]
+                    [str(self.index2id[i]) for i in self.scaffold2index_orders[scaffold]]
                 )
 
             for i, f in enumerate(self.chemical_space.get("feature_names", [])):
