@@ -1,4 +1,5 @@
-import csv, json, argparse, copy, re, os, requests, time
+import csv, argparse, copy, re, os, requests, time
+import simplejson as json
 from collections import defaultdict
 
 import numpy as np
@@ -1037,10 +1038,10 @@ class ChemSpace():
         space_json = self.chemical_space
 
         if minify:
-            space_json = json.dumps(space_json)
+            space_json = json.dumps(space_json, ignore_nan=True)
             space_json = self._minify_data(space_json)
         elif dump:
-            space_json = json.dumps(space_json, indent=4)
+            space_json = json.dumps(space_json, indent=4,  ignore_nan=True)
 
         if filename:
             output = open(filename, "w")
