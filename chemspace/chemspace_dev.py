@@ -870,7 +870,6 @@ class ChemSpace():
                         self.chemical_space["points"][cid]["links"] = []
 
                     for e, weight in es.items():
-                        print(e, weight)
                         self.chemical_space["points"][cid]["links"].append([e, weight])
 
             index2coords = {index:coords[i] for i, index in enumerate(self.index_order)}
