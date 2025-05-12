@@ -141,7 +141,8 @@ DATA_KEYS = {
         "features": "f",
         "object_ids": "o",
         "smiles": "s",
-        "label": "l"
+        "label": "l",
+        "links": "ls"
     }
 }
 
@@ -866,11 +867,11 @@ class ChemSpace():
                 #     self._get_edges(similarity_threshold=similarity_threshold, knn=knn)
 
                 for cid, es in self.index2edges.items():
-                    if not self.chemical_space["points"][cid].get("links", False):
-                        self.chemical_space["points"][cid]["links"] = []
+                    if not self.chemical_space["points"][cid].get(self.KEYS.get("links", "links"), False):
+                        self.chemical_space["points"][cid][self.KEYS.get("links", "links")] = []
 
                     for e, weight in es.items():
-                        self.chemical_space["points"][cid]["links"].append([e, weight])
+                        self.chemical_space["points"][cid][self.KEYS.get("links", "links")].append([e, weight])
 
             index2coords = {index:coords[i] for i, index in enumerate(self.index_order)}
 
@@ -955,7 +956,10 @@ class ChemSpace():
                 value = round(np.mean(values), 2) if len(values) else None
                 self.chemical_space["points"][index][self.KEYS.get("features", "features")].append(value)
 
-            self.chemical_space["compounds"][label] = {self.KEYS.get("smiles", "smiles"): scaffold, "color": "red"}
+            self.chemical_space["compounds"][label] = {
+                self.KEYS.get("smiles", "smiles"): scaffold,
+                # "color": "red"
+            }
             
             if self.only_scaffolds:
                 for i in self.scaffold2index_orders[scaffold]:
