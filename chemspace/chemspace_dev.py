@@ -29,7 +29,7 @@ from rdkit.Chem import Draw, AllChem, Scaffolds, Lipinski,\
     Crippen, rdMolDescriptors, TemplateAlign, QED
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
-PROPS_ORDER = ["mw", "hba", "hbd", "rb", "rc", "arc", "logp", "tpsa", "fcsp3", "ncc", "qed"]
+PROPS_ORDER = ["mw", "hba", "hbd", "rb", "rc", "arc", "hc", "logp", "tpsa", "fcsp3", "ncc", "qed"]
         
 PROP2FNC = {
     "mw": rdMolDescriptors.CalcExactMolWt,
@@ -37,6 +37,7 @@ PROP2FNC = {
     "hbd": Lipinski.NumHDonors,
     "rb": Lipinski.NumRotatableBonds,
     "rc": Lipinski.RingCount,
+    "hc": rdMolDescriptors.CalcNumHeteroatoms,
     "arc": Lipinski.NumAromaticRings,
     "logp": Crippen.MolLogP, 
     "tpsa": rdMolDescriptors.CalcTPSA,
@@ -52,6 +53,7 @@ PROP2LABEL = {
     "rb": "Rotatable bonds",
     "rc": "Rings",
     "arc": "Aromatic rings",
+    "hc": "Heteroatoms",
     "logp": "cLogP",
     "tpsa": "TPSA",
     "fcsp3": "Fraction of csp3",
