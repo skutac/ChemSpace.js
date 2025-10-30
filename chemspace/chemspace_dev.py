@@ -8,13 +8,13 @@ from scipy.spatial import distance
 from sklearn import manifold, metrics, decomposition, preprocessing
 from sklearn.impute import SimpleImputer
 
-try:    
+try:
     import tmap
 except Exception as e:
     print(e)
 
 try:
-    from MulticoreTSNE import MulticoreTSNE
+    from openTSNE import TSNE
 except Exception as e:
     print(e)
 
@@ -719,19 +719,35 @@ class ChemSpace():
         coords = tsne.fit_transform(data)
         return coords
 
+    # def _tsne(self, data, **kwargs):
+    #     tsne = manifold.TSNE(n_components=2, metric='precomputed')
+    #     coords = tsne.fit_transform(data)
+    #     coords = [[float(x[0]), float(x[1])] for x in coords]
+    #     return coords
+
     def _tsne(self, data, **kwargs):
-        tsne = manifold.TSNE(n_components=2, metric='precomputed')
-        coords = tsne.fit_transform(data)
+        print("Calculating PCA: 50 components")
+        pca = decomposition.PCA(n_components=50)
+        data = pca.fit_transform(data)
+        
+        tsne = TSNE(
+            perplexity=30,
+            metric="euclidean",
+            n_jobs=self.n_jobs,
+            random_state=42,
+            verbose=True,
+        )
+        coords = tsne.fit(data)
         coords = [[float(x[0]), float(x[1])] for x in coords]
         return coords
 
     def _umap(self, data, **kwargs):
-        print("Calculating PCA: 20 components")
-        pca = decomposition.PCA(n_components=20)
+        print("Calculating PCA: 50 components")
+        pca = decomposition.PCA(n_components=50)
         data = pca.fit_transform(data)
 
         # umap = UMAP(n_neighbors=20, min_dist=1, metric="jaccard")
-        umap = UMAP(n_neighbors=20, min_dist=1, metric="euclidean")
+        umap = UMAP(n_neighbors=30, min_dist=1, metric="euclidean")
         coords = umap.fit_transform(data)
         coords = [[float(x[0]), float(x[1])] if not np.isnan(x[0]) else [0, 0] for x in coords]
         return coords
