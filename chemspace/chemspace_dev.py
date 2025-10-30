@@ -1,13 +1,17 @@
 import csv, argparse, copy, re, os, requests, time
 import simplejson as json
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 from scipy.spatial import distance
 from sklearn import manifold, metrics, decomposition, preprocessing
 from sklearn.impute import SimpleImputer
 
-import tmap
+try:    
+    import tmap
+except Exception as e:
+    print(e)
 
 try:
     from MulticoreTSNE import MulticoreTSNE
@@ -489,39 +493,89 @@ class ChemSpace():
     def add_paths_from_file(self):
         pass
 
-    def add_physico_chemical_properties(self):
-        print("Calculating physico-chemical properties: {} compounds".format(len(self.index2rdmol)))
+    # def add_physico_chemical_properties(self):
+    #     print("Calculating physico-chemical properties: {} compounds".format(len(self.index2rdmol)))
+    #     self.pcp = True
+    #     if len(self.index2rdmol):
+    #         count = len(self.index2rdmol)
+    #         i = 0
+
+    #         id2pcp = {}
+    #         for index, rdmol in self.index2rdmol.items():
+    #             if i%100 == 0 or i == count:
+    #                 print("{}/{}".format(i, count))
+
+    #             id2pcp[index] = self._get_pcp_for_rdmol(rdmol)
+    #             i+=1
+
+    #         empty = [None for x in PROP2LABEL]
+    #         for i, index in enumerate(self.index_order):
+                
+    #             if id2pcp.get(index, False):
+    #                 pcps = id2pcp[index]
+    #             else:
+    #                 pcps = empty
+                
+    #             self.chemical_space["points"][index][self.KEYS.get("features", "features")].extend(pcps)
+
+    #         current_header = self.chemical_space.get("feature_names", [])
+    #         current_header.extend([PROP2LABEL[prop] for prop in PROPS_ORDER])
+    #         self.chemical_space["feature_names"] = current_header
+
+    # def _get_pcp_for_rdmol(self, rdmol):
+    #     return [round(PROP2FNC[prop](rdmol), 2) for prop in PROPS_ORDER]
+
+    def _pcp_worker(item):
+        """Worker function to compute physico-chemical properties for one molecule."""
+        index, rdmol, props_order = item
+        try:
+            pcps = [round(PROP2FNC[prop](rdmol), 2) for prop in props_order]
+        except Exception:
+            pcps = [None for _ in props_order]
+        return index, pcps
+
+
+    def add_physico_chemical_properties(self, show_progress=True):
+        print(f"Calculating physico-chemical properties: {len(self.index2rdmol)} compounds")
         self.pcp = True
-        if len(self.index2rdmol):
-            count = len(self.index2rdmol)
-            i = 0
 
-            id2pcp = {}
-            for index, rdmol in self.index2rdmol.items():
-                if i%100 == 0 or i == count:
-                    print("{}/{}".format(i, count))
+        if not len(self.index2rdmol):
+            return
 
-                id2pcp[index] = self._get_pcp_for_rdmol(rdmol)
-                i+=1
+        count = len(self.index2rdmol)
+        id2pcp = {}
 
-            empty = [None for x in PROP2LABEL]
-            for i, index in enumerate(self.index_order):
-                
-                if id2pcp.get(index, False):
-                    pcps = id2pcp[index]
-                else:
-                    pcps = empty
-                
-                self.chemical_space["points"][index][self.KEYS.get("features", "features")].extend(pcps)
-                # self.data[i].extend(pcps)                
+        with ProcessPoolExecutor(max_workers=self.n_jobs) as executor:
+            futures = [
+                executor.submit(_pcp_worker, (index, rdmol, PROPS_ORDER))
+                for index, rdmol in self.index2rdmol.items()
+            ]
 
-            current_header = self.chemical_space.get("feature_names", [])
-            current_header.extend([PROP2LABEL[prop] for prop in PROPS_ORDER])
-            self.chemical_space["feature_names"] = current_header
-            # self.original_data = copy.deepcopy(self.data)
+            if show_progress:
+                from tqdm import tqdm
+                futures_iter = tqdm(as_completed(futures), total=len(futures))
+            else:
+                futures_iter = as_completed(futures)
 
-    def _get_pcp_for_rdmol(self, rdmol):
-        return [round(PROP2FNC[prop](rdmol), 2) for prop in PROPS_ORDER]
+            for i, fut in enumerate(futures_iter, start=1):
+                index, pcps = fut.result()
+                id2pcp[index] = pcps
+
+                if not show_progress and (i % 100 == 0 or i == count):
+                    print(f"{i}/{count}")
+
+        # Fill missing values
+        empty = [None for _ in PROP2LABEL]
+
+        # Attach results to self.chemical_space
+        for index in self.index_order:
+            pcps = id2pcp.get(index, empty)
+            self.chemical_space["points"][index][self.KEYS.get("features", "features")].extend(pcps)
+
+        # Update headers
+        current_header = self.chemical_space.get("feature_names", [])
+        current_header.extend([PROP2LABEL[prop] for prop in PROPS_ORDER])
+        self.chemical_space["feature_names"] = current_header
 
     def normalize_data(self, feature_range=(0,1)):
         """Normalizes data to a scale from 0 to 1."""
