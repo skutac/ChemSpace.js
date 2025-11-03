@@ -152,6 +152,15 @@ DATA_KEYS = {
     }
 }
 
+def _pcp_worker(item):
+    """Worker function to compute physico-chemical properties for one molecule."""
+    index, rdmol, props_order = item
+    try:
+        pcps = [round(PROP2FNC[prop](rdmol), 2) for prop in props_order]
+    except Exception:
+        pcps = [None for _ in props_order]
+    return index, pcps
+
 class ChemSpace():
 
     def __init__(
@@ -524,16 +533,6 @@ class ChemSpace():
 
     # def _get_pcp_for_rdmol(self, rdmol):
     #     return [round(PROP2FNC[prop](rdmol), 2) for prop in PROPS_ORDER]
-
-    def _pcp_worker(item):
-        """Worker function to compute physico-chemical properties for one molecule."""
-        index, rdmol, props_order = item
-        try:
-            pcps = [round(PROP2FNC[prop](rdmol), 2) for prop in props_order]
-        except Exception:
-            pcps = [None for _ in props_order]
-        return index, pcps
-
 
     def add_physico_chemical_properties(self, show_progress=True):
         print(f"Calculating physico-chemical properties: {len(self.index2rdmol)} compounds")
