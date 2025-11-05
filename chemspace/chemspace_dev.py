@@ -23,6 +23,8 @@ try:
 except Exception as e:
     print(e)
 
+import pygraphviz as pgv
+import tempfile
 import igraph
 import jsmin
 
@@ -160,6 +162,55 @@ def _pcp_worker(item):
     except Exception:
         pcps = [None for _ in props_order]
     return index, pcps
+
+def sfdp_layout_mst(igraph_graph, weight_attr="weight", prog="sfdp"):
+    """
+    Compute a beautiful, weighted layout for an MST using Graphviz's sfdp.
+
+    Parameters
+    ----------
+    igraph_graph : igraph.Graph
+        The MST graph.
+    weight_attr : str
+        The edge attribute to use as weight (default "weight").
+    prog : str
+        Graphviz layout program ("sfdp", "neato", "fdp", "dot").
+
+    Returns
+    -------
+    dict
+        Dictionary mapping vertex index -> (x, y) coordinates.
+    """
+    coords = {}
+    weights = igraph_graph.es[weight_attr]
+    max_weight = 1.0
+    min_weight = 0.01
+
+    # Temporary DOT file
+    with tempfile.NamedTemporaryFile(suffix=".dot") as tmpfile:
+        igraph_graph.write_dot(tmpfile.name)
+        print("Calculating sdfp (MST) layout...")
+        A = pgv.AGraph(tmpfile.name)
+
+        # Beautify graph
+        # A.graph_attr["sep"] = "5"
+
+        # Map MST weights to edge lengths (smaller weight = shorter edge)
+        # for e, w in zip(A.edges(), weights):
+            # scale to 0.5-1.5 range for sfdp
+            # e.attr['len'] = str(0.5 + (w / max_weight))
+            # e.attr['len'] = str((w / min_weight)**2)
+
+        # Compute layout
+        print("Computing layout...")
+        A.layout(prog=prog, args="-Gbeautify=true -Gmindist=10")
+
+        # Extract coordinates
+        for node in A.nodes():
+            x, y = map(float, node.attr["pos"].split(","))
+            coords[int(node)] = (x, y)
+
+    return coords
 
 class ChemSpace():
 
@@ -799,35 +850,42 @@ class ChemSpace():
 
     def _mst_scaffolds(self, data, **kwargs):
         edges = []
+        only_edges = []
+        weights = []
         scaffold_index2order = {si: i for i, si in enumerate(self.scaffold_index_order)}
         identity2value = {0: 0.01}
         
         print("SCAFFOLD EDGES")
         for i, e in enumerate(self.edges):
             weight = 1 - self.edges_weights[i]
-            edges.append((e[0], e[1], identity2value.get(weight, weight)))
+            # edges.append((e[0], e[1], identity2value.get(weight, weight)))
+            only_edges.append((e[0], e[1]))
+            weights.append(identity2value.get(weight, weight))
 
         if not self.only_scaffolds:
             print("SCAFFOLD COMPOUNDS EDGES")
             for i, e in enumerate(self.scaffold_edges):
-                edges.append((e[0], e[1], 0))
+                # edges.append((e[0], e[1], 0))
+                only_edges.append((e[0], e[1]))
+                weights.append(1)
 
-        g = igraph.Graph.Weighted_Adjacency(self.dist_matrix.tolist(), mode="UNDIRECTED", attr="weight", loops=False)
+        # g = igraph.Graph.Weighted_Adjacency(self.dist_matrix.tolist(), mode="UNDIRECTED", attr="weight", loops=False)
 
+        # mst = g.spanning_tree(weights=g.es["weight"], return_tree=True)
+
+        g = igraph.Graph(edges=only_edges, directed=False)
+        g.es["weight"] = weights
+
+        # Compute MST
         mst = g.spanning_tree(weights=g.es["weight"], return_tree=True)
+        coords = sfdp_layout_mst(mst, weight_attr="weight")
 
-        # --- Get circular layout ---
-        layout = mst.layout("circle")   # <--- circular layout
-        coords = np.array(layout.coords)
-        print(g)
-        # x, y, s, t, _ = tmap.layout_from_edge_list(
-        #     len(self.index_order), edges, create_mst=True
-        # )
+        # layout = mst.layout("kamada_kawai")
+        # coords = np.array(layout.coords)
 
-        # coords = list(zip(x, y))
         index2edges = defaultdict(dict)
         
-        for i, ids in enumerate(zip(s, t)):
+        for i, ids in enumerate(mst.get_edgelist()):
             sid1 = scaffold_index2order.get(ids[0], False)
             value = None
 
@@ -838,7 +896,7 @@ class ChemSpace():
                     value = round(self.dist_matrix[sid1][sid2], 2)
 
             self.index2edges[ids[0]][ids[1]] = value
-        print(coords)
+        
         return coords
 
     # def _mst_scaffolds(self, data, **kwargs):
@@ -980,16 +1038,16 @@ class ChemSpace():
                 #     if knn is None:
                 #         knn = len(self.index_order)
                 #     self._get_edges(similarity_threshold=similarity_threshold, knn=knn)
-                print("HERE")
+                
                 for cid, es in self.index2edges.items():
                     if not self.chemical_space["points"][cid].get(self.KEYS.get("links", "links"), False):
                         self.chemical_space["points"][cid][self.KEYS.get("links", "links")] = []
 
                     for e, weight in es.items():
                         self.chemical_space["points"][cid][self.KEYS.get("links", "links")].append([e, weight])
-            print("HERE 2")
+            
             index2coords = {index:coords[i] for i, index in enumerate(self.index_order)}
-            print("HERE 3")
+            
             for index, values in self.chemical_space["points"].items():
                 if index in index2coords:
                     point_features = self.chemical_space["points"][index][self.KEYS.get("features", "features")]
@@ -1000,7 +1058,7 @@ class ChemSpace():
 
                 else:
                     self.chemical_space["points"].pop(index, None)
-            print("HERE 4")        
+            
             feature_names.extend(self.chemical_space.get("feature_names", []))
             self.chemical_space["feature_names"] = feature_names
 
