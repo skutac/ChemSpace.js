@@ -812,11 +812,19 @@ class ChemSpace():
             for i, e in enumerate(self.scaffold_edges):
                 edges.append((e[0], e[1], 0))
 
-        x, y, s, t, _ = tmap.layout_from_edge_list(
-            len(self.index_order), edges, create_mst=True
-        )
+        g = igraph.Graph.Weighted_Adjacency(self.dist_matrix.tolist(), mode="UNDIRECTED", attr="weight", loops=False)
 
-        coords = list(zip(x, y))
+        mst = g.spanning_tree(weights=g.es["weight"], return_tree=True)
+
+        # --- Get circular layout ---
+        layout = mst.layout("circle")   # <--- circular layout
+        coords = np.array(layout.coords)
+        print(g)
+        # x, y, s, t, _ = tmap.layout_from_edge_list(
+        #     len(self.index_order), edges, create_mst=True
+        # )
+
+        # coords = list(zip(x, y))
         index2edges = defaultdict(dict)
         
         for i, ids in enumerate(zip(s, t)):
@@ -830,8 +838,44 @@ class ChemSpace():
                     value = round(self.dist_matrix[sid1][sid2], 2)
 
             self.index2edges[ids[0]][ids[1]] = value
-
+        print(coords)
         return coords
+
+    # def _mst_scaffolds(self, data, **kwargs):
+    #     edges = []
+    #     scaffold_index2order = {si: i for i, si in enumerate(self.scaffold_index_order)}
+    #     identity2value = {0: 0.01}
+        
+    #     print("SCAFFOLD EDGES")
+    #     for i, e in enumerate(self.edges):
+    #         weight = 1 - self.edges_weights[i]
+    #         edges.append((e[0], e[1], identity2value.get(weight, weight)))
+
+    #     if not self.only_scaffolds:
+    #         print("SCAFFOLD COMPOUNDS EDGES")
+    #         for i, e in enumerate(self.scaffold_edges):
+    #             edges.append((e[0], e[1], 0))
+
+    #     x, y, s, t, _ = tmap.layout_from_edge_list(
+    #         len(self.index_order), edges, create_mst=True
+    #     )
+
+    #     coords = list(zip(x, y))
+    #     index2edges = defaultdict(dict)
+        
+    #     for i, ids in enumerate(zip(s, t)):
+    #         sid1 = scaffold_index2order.get(ids[0], False)
+    #         value = None
+
+    #         if sid1:
+    #             sid2 = scaffold_index2order.get(ids[1], False)
+
+    #             if sid2:
+    #                 value = round(self.dist_matrix[sid1][sid2], 2)
+
+    #         self.index2edges[ids[0]][ids[1]] = value
+
+    #     return coords
 
     def arrange(self, by="fps", fps=None, method="pca", similarity_threshold=0.7, add_edges=None, weights=False, knn=None, add_scaffolds_category=False, only_scaffolds=False):
         self.dist_matrix = False
@@ -936,16 +980,16 @@ class ChemSpace():
                 #     if knn is None:
                 #         knn = len(self.index_order)
                 #     self._get_edges(similarity_threshold=similarity_threshold, knn=knn)
-
+                print("HERE")
                 for cid, es in self.index2edges.items():
                     if not self.chemical_space["points"][cid].get(self.KEYS.get("links", "links"), False):
                         self.chemical_space["points"][cid][self.KEYS.get("links", "links")] = []
 
                     for e, weight in es.items():
                         self.chemical_space["points"][cid][self.KEYS.get("links", "links")].append([e, weight])
-
+            print("HERE 2")
             index2coords = {index:coords[i] for i, index in enumerate(self.index_order)}
-
+            print("HERE 3")
             for index, values in self.chemical_space["points"].items():
                 if index in index2coords:
                     point_features = self.chemical_space["points"][index][self.KEYS.get("features", "features")]
@@ -956,7 +1000,7 @@ class ChemSpace():
 
                 else:
                     self.chemical_space["points"].pop(index, None)
-
+            print("HERE 4")        
             feature_names.extend(self.chemical_space.get("feature_names", []))
             self.chemical_space["feature_names"] = feature_names
 
