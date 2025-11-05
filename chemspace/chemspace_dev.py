@@ -203,7 +203,7 @@ def sfdp_layout_mst(igraph_graph, weight_attr="weight", prog="sfdp"):
 
         # Compute layout
         print("Computing layout...")
-        A.layout(prog=prog, args="-Gbeautify=true -Gmindist=10")
+        A.layout(prog=prog, args="-Gsmoothing=spring -Gquadtree=2")
 
         # Extract coordinates
         for node in A.nodes():
@@ -831,20 +831,33 @@ class ChemSpace():
         return coords
 
     def _mst(self, data, **kwargs):
-        edges = []
+        # edges = []
+        only_edges = []
+        weights = []
 
         for i, e in enumerate(self.edges):
-            edges.append((e[0], e[1], 1 - self.edges_weights[i]))
+            # edges.append((e[0], e[1], 1 - self.edges_weights[i]))
+            only_edges.append((e[0], e[1]))
+            weights.append(1 - self.edges_weights[i])
 
-        x, y, s, t, _ = tmap.layout_from_edge_list(
-            len(data), edges, create_mst=True
-        )
-        
-        coords = list(zip(x, y))
-        index2edges = defaultdict(dict)
-        
-        for i, indexes in enumerate(zip(s, t)):
+        g = igraph.Graph(edges=only_edges, directed=False)
+        g.es["weight"] = weights
+
+        # Compute MST
+        mst = g.spanning_tree(weights=g.es["weight"], return_tree=True)
+        coords = sfdp_layout_mst(mst, weight_attr="weight")
+
+        for i, indexes in enumerate(mst.get_edgelist()):
             self.index2edges[indexes[0]][indexes[1]] = round(self.dist_matrix[indexes[0]][indexes[1]], 2)
+        # x, y, s, t, _ = tmap.layout_from_edge_list(
+        #     len(data), edges, create_mst=True
+        # )
+        
+        # coords = list(zip(x, y))
+        # index2edges = defaultdict(dict)
+        
+        # for i, indexes in enumerate(zip(s, t)):
+        #     self.index2edges[indexes[0]][indexes[1]] = round(self.dist_matrix[indexes[0]][indexes[1]], 2)
         
         return coords
 
