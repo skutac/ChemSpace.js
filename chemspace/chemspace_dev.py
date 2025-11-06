@@ -163,18 +163,14 @@ def _pcp_worker(item):
         pcps = [None for _ in props_order]
     return index, pcps
 
-def sfdp_layout_mst(igraph_graph, weight_attr="weight", prog="sfdp"):
+def sfdp_layout_mst(igraph_graph):
     """
-    Compute a beautiful, weighted layout for an MST using Graphviz's sfdp.
+    Compute a layout for an MST using Graphviz's sfdp.
 
     Parameters
     ----------
     igraph_graph : igraph.Graph
         The MST graph.
-    weight_attr : str
-        The edge attribute to use as weight (default "weight").
-    prog : str
-        Graphviz layout program ("sfdp", "neato", "fdp", "dot").
 
     Returns
     -------
@@ -182,18 +178,14 @@ def sfdp_layout_mst(igraph_graph, weight_attr="weight", prog="sfdp"):
         Dictionary mapping vertex index -> (x, y) coordinates.
     """
     coords = {}
-    weights = igraph_graph.es[weight_attr]
-    max_weight = 1.0
-    min_weight = 0.01
 
-    # Temporary DOT file
     with tempfile.NamedTemporaryFile(suffix=".dot") as tmpfile:
         igraph_graph.write_dot(tmpfile.name)
         print("Calculating sdfp (MST) layout...")
         A = pgv.AGraph(tmpfile.name)
 
         print("Computing layout...")
-        A.layout(prog=prog, args="-Gsmoothing=triangle")
+        A.layout(prog="sfdp", args="-Gsmoothing=triangle")
         
         # Extract coordinates
         for node in A.nodes():
@@ -404,6 +396,9 @@ class ChemSpace():
                 if rdmol is not None:
                     self.index2rdmol[i] = rdmol
                     self.index2fpobj[i] = FP2FNC[self.fp](rdmol)
+                else:
+                    self.index2rdmol[i] = empty
+                    self.index2fpobj[i] = empty_fp
 
             except Exception as e:
                 self.index2rdmol[i] = empty
@@ -697,10 +692,6 @@ class ChemSpace():
         # sklearn implementation
         mds = manifold.MDS(n_components=2, dissimilarity='precomputed')
         coords = mds.fit_transform(data)
-
-        # igraph implementation
-        # layout = g.layout_mds(data, 2, arpack_options=igraph.ARPACKOptions(iter=1000))
-        # coords = layout.coords
         return coords
 
     def _fa(self, data, **kwargs):
@@ -783,7 +774,7 @@ class ChemSpace():
 
         # Compute MST
         mst = g.spanning_tree(weights=g.es["weight"], return_tree=True)
-        coords = sfdp_layout_mst(mst, weight_attr="weight")
+        coords = sfdp_layout_mst(mst)
 
         for i, indexes in enumerate(mst.get_edgelist()):
             self.index2edges[indexes[0]][indexes[1]] = round(self.dist_matrix[indexes[0]][indexes[1]], 2)
@@ -825,10 +816,10 @@ class ChemSpace():
 
         # Compute MST
         mst = g.spanning_tree(weights=g.es["weight"], return_tree=True)
-        coords = sfdp_layout_mst(mst, weight_attr="weight")
+        coords = sfdp_layout_mst(mst)
 
         index2edges = defaultdict(dict)
-        
+        print("Creating index2edges...")
         for i, ids in enumerate(mst.get_edgelist()):
             sid1 = scaffold_index2order.get(ids[0], False)
             value = None
@@ -982,14 +973,17 @@ class ChemSpace():
                 #     if knn is None:
                 #         knn = len(self.index_order)
                 #     self._get_edges(similarity_threshold=similarity_threshold, knn=knn)
-                
+                print("HERE 1")
+                print(list(self.chemical_space["points"].keys()))
                 for cid, es in self.index2edges.items():
-                    if not self.chemical_space["points"][cid].get(self.KEYS.get("links", "links"), False):
-                        self.chemical_space["points"][cid][self.KEYS.get("links", "links")] = []
-
-                    for e, weight in es.items():
-                        self.chemical_space["points"][cid][self.KEYS.get("links", "links")].append([e, weight])
+                    if cid in self.chemical_space["points"]:
+                        if not self.chemical_space["points"][cid].get(self.KEYS.get("links", "links"), False):
+                            self.chemical_space["points"][cid][self.KEYS.get("links", "links")] = []
+                        for e, weight in es.items():
+                            self.chemical_space["points"][cid][self.KEYS.get("links", "links")].append([e, weight])
+                print("HERE 2")
             
+            print("HERE 3")
             index2coords = {index:coords[i] for i, index in enumerate(self.index_order)}
             
             for index, values in self.chemical_space["points"].items():
@@ -1002,7 +996,7 @@ class ChemSpace():
 
                 else:
                     self.chemical_space["points"].pop(index, None)
-            
+            print("HERE 4")
             feature_names.extend(self.chemical_space.get("feature_names", []))
             self.chemical_space["feature_names"] = feature_names
 
