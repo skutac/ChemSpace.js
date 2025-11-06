@@ -9,11 +9,6 @@ from sklearn import manifold, metrics, decomposition, preprocessing
 from sklearn.impute import SimpleImputer
 
 try:
-    import tmap
-except Exception as e:
-    print(e)
-
-try:
     from openTSNE import TSNE
 except Exception as e:
     print(e)
@@ -772,21 +767,11 @@ class ChemSpace():
         g = igraph.Graph(edges=only_edges, directed=False)
         g.es["weight"] = weights
 
-        # Compute MST
         mst = g.spanning_tree(weights=g.es["weight"], return_tree=True)
         coords = sfdp_layout_mst(mst)
 
         for i, indexes in enumerate(mst.get_edgelist()):
             self.index2edges[indexes[0]][indexes[1]] = round(self.dist_matrix[indexes[0]][indexes[1]], 2)
-        # x, y, s, t, _ = tmap.layout_from_edge_list(
-        #     len(data), edges, create_mst=True
-        # )
-        
-        # coords = list(zip(x, y))
-        # index2edges = defaultdict(dict)
-        
-        # for i, indexes in enumerate(zip(s, t)):
-        #     self.index2edges[indexes[0]][indexes[1]] = round(self.dist_matrix[indexes[0]][indexes[1]], 2)
         
         return coords
 
