@@ -834,42 +834,6 @@ class ChemSpace():
         
         return coords
 
-    # def _mst_scaffolds(self, data, **kwargs):
-    #     edges = []
-    #     scaffold_index2order = {si: i for i, si in enumerate(self.scaffold_index_order)}
-    #     identity2value = {0: 0.01}
-        
-    #     print("SCAFFOLD EDGES")
-    #     for i, e in enumerate(self.edges):
-    #         weight = 1 - self.edges_weights[i]
-    #         edges.append((e[0], e[1], identity2value.get(weight, weight)))
-
-    #     if not self.only_scaffolds:
-    #         print("SCAFFOLD COMPOUNDS EDGES")
-    #         for i, e in enumerate(self.scaffold_edges):
-    #             edges.append((e[0], e[1], 0))
-
-    #     x, y, s, t, _ = tmap.layout_from_edge_list(
-    #         len(self.index_order), edges, create_mst=True
-    #     )
-
-    #     coords = list(zip(x, y))
-    #     index2edges = defaultdict(dict)
-        
-    #     for i, ids in enumerate(zip(s, t)):
-    #         sid1 = scaffold_index2order.get(ids[0], False)
-    #         value = None
-
-    #         if sid1:
-    #             sid2 = scaffold_index2order.get(ids[1], False)
-
-    #             if sid2:
-    #                 value = round(self.dist_matrix[sid1][sid2], 2)
-
-    #         self.index2edges[ids[0]][ids[1]] = value
-
-    #     return coords
-
     def arrange(self, by="fps", fps=None, method="pca", similarity_threshold=0.7, add_edges=None, weights=False, knn=None, add_scaffolds_category=False, only_scaffolds=False):
         self.dist_matrix = False
         self.edges = []
@@ -973,17 +937,13 @@ class ChemSpace():
                 #     if knn is None:
                 #         knn = len(self.index_order)
                 #     self._get_edges(similarity_threshold=similarity_threshold, knn=knn)
-                print("HERE 1")
-                print(list(self.chemical_space["points"].keys()))
+                
                 for cid, es in self.index2edges.items():
-                    if cid in self.chemical_space["points"]:
-                        if not self.chemical_space["points"][cid].get(self.KEYS.get("links", "links"), False):
-                            self.chemical_space["points"][cid][self.KEYS.get("links", "links")] = []
-                        for e, weight in es.items():
-                            self.chemical_space["points"][cid][self.KEYS.get("links", "links")].append([e, weight])
-                print("HERE 2")
-            
-            print("HERE 3")
+                    if not self.chemical_space["points"][cid].get(self.KEYS.get("links", "links"), False):
+                        self.chemical_space["points"][cid][self.KEYS.get("links", "links")] = []
+                    for e, weight in es.items():
+                        self.chemical_space["points"][cid][self.KEYS.get("links", "links")].append([e, weight])
+                
             index2coords = {index:coords[i] for i, index in enumerate(self.index_order)}
             
             for index, values in self.chemical_space["points"].items():
@@ -993,10 +953,9 @@ class ChemSpace():
                     # features = [index2coords[index][0], index2coords[index][1]]
                     features.extend(point_features)
                     self.chemical_space["points"][index][self.KEYS.get("features", "features")] = features
-
                 else:
                     self.chemical_space["points"].pop(index, None)
-            print("HERE 4")
+            
             feature_names.extend(self.chemical_space.get("feature_names", []))
             self.chemical_space["feature_names"] = feature_names
 
@@ -1251,27 +1210,3 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     _process_(args)
-
-
-# elif method == "sas":
-#     print("\nCalculating SAS...")
-#     feature_names = ["Similarity", "Activity difference"]
-#     self.chemical_space = {"points": {}, "feature_names": ["SALI"]}
-#     ai = self.header.index(self.activity_field)
-#     ids = []
-#     coords = []
-    
-#     for i, index_1 in enumerate(self.index_order[:-1]):
-#         for j, index_2 in enumerate(self.index_order[i:], i):
-#             if i != j:
-#                 activity_diff = round(abs(float(self.data[i][ai]) - float(self.data[j][ai])), 2)
-#                 distance = self.dist_matrix[i][j]
-#                 distance = distance if distance > 0 else 0.01
-
-#                 sali = round(activity_diff/distance, 2)
-#                 coord = [round(1 - self.dist_matrix[i][j], 2), activity_diff]
-#                 self.chemical_space["points"]["{}_{}".format(index_1, index_2)] = {"features": [sali]}
-#                 ids.append("{}_{}".format(index_1, index_2))
-#                 coords.append(coord)
-
-#     self.index_order = ids
