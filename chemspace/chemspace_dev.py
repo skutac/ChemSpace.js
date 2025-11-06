@@ -27,7 +27,7 @@ import rdkit
 from rdkit import Chem, DataStructs, Geometry
 from rdkit.DataStructs import cDataStructs
 from rdkit.Chem import Draw, AllChem, Scaffolds, Lipinski,\
-    Crippen, rdMolDescriptors, TemplateAlign, QED
+    Crippen, rdMolDescriptors, TemplateAlign, QED, rdFingerprintGenerator
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
 PROPS_ORDER = ["mw", "hba", "hbd", "rb", "rc", "arc", "hc", "logp", "tpsa", "fcsp3", "ncc", "qed"]
@@ -63,11 +63,12 @@ PROP2LABEL = {
 }
 
 FP2FNC = {
-    "ecfp4": lambda rdmol: AllChem.GetMorganFingerprintAsBitVect(rdmol, radius=2, nBits=1024),
+    # "ecfp4": lambda rdmol: AllChem.GetMorganFingerprintAsBitVect(rdmol, radius=2, nBits=1024),
     "ecfp6": lambda rdmol: AllChem.GetMorganFingerprintAsBitVect(rdmol, radius=3, nBits=1024),
     "atompairs": lambda rdmol: AllChem.GetHashedAtomPairFingerprintAsBitVect(rdmol, nBits=1024),
     "torsion": lambda rdmol: AllChem.GetHashedTopologicalTorsionFingerprintAsBitVect(rdmol, nBits=1024),
     "maccs": lambda rdmol: AllChem.GetMACCSKeysFingerprint(rdmol),
+    "ecfp4": rdFingerprintGenerator.GetMorganGenerator(radius=2,fpSize=1024)
 }
 
 METHODS = {
@@ -382,7 +383,7 @@ class ChemSpace():
 
     def _read_compounds(self):
         empty = Chem.MolFromSmiles("")
-        empty_fp = FP2FNC[self.fp](empty)
+        empty_fp = FP2FNC[self.fp].GetFingerprint(empty)
 
         for i, smi in self.index2compound.items():
             try:
@@ -390,7 +391,8 @@ class ChemSpace():
 
                 if rdmol is not None:
                     self.index2rdmol[i] = rdmol
-                    self.index2fpobj[i] = FP2FNC[self.fp](rdmol)
+                    self.index2fpobj[i] = FP2FNC[self.fp].GetFingerprint(rdmol)
+                    # FP2FNC[self.fp](rdmol)
                 else:
                     self.index2rdmol[i] = empty
                     self.index2fpobj[i] = empty_fp
@@ -968,7 +970,7 @@ class ChemSpace():
         order = len(self.index_order)
 
         for index, scaffold in enumerate(self.scaffold2indexes.keys(), self.index_order[-1]+1):
-            self.index2fpobj[index] = FP2FNC[self.fp](self.scaffold2rdmol[scaffold])
+            self.index2fpobj[index] = FP2FNC[self.fp].GetFingerprint(self.scaffold2rdmol[scaffold])
             self.index2scaffold[index] = scaffold
             self.index2rdmol[index] = self.scaffold2rdmol[scaffold]
             self.index_order.append(index)
