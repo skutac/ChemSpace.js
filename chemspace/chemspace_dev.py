@@ -192,23 +192,15 @@ def sfdp_layout_mst(igraph_graph, weight_attr="weight", prog="sfdp"):
         print("Calculating sdfp (MST) layout...")
         A = pgv.AGraph(tmpfile.name)
 
-        # Beautify graph
-        # A.graph_attr["sep"] = "5"
-
-        # Map MST weights to edge lengths (smaller weight = shorter edge)
-        # for e, w in zip(A.edges(), weights):
-            # scale to 0.5-1.5 range for sfdp
-            # e.attr['len'] = str(0.5 + (w / max_weight))
-            # e.attr['len'] = str((w / min_weight)**2)
-
-        # Compute layout
         print("Computing layout...")
-        A.layout(prog=prog, args="-Gsmoothing=spring -Gquadtree=2")
-
+        A.layout(prog=prog, args="-Gsmoothing=triangle")
+        
         # Extract coordinates
         for node in A.nodes():
             x, y = map(float, node.attr["pos"].split(","))
             coords[int(node)] = (x, y)
+
+        print("Layout done...")
 
     return coords
 
@@ -324,17 +316,6 @@ class ChemSpace():
             self.chemical_space["categories"] = []
 
         self.chemical_space["categories"].append(category)
-
-
-    # def add_compounds(self, rows):
-    #     """Reads data in a form of list of lists (tuples)"""
-    #     self.compounds = {r[0]: r[1] for r in rows}
-    #     self.chemical_space["compounds"] = {}
-    #     self._parse_compounds_()
-
-    #     for key in self.chemical_space["points"]:
-    #         if key in self.id2rdmol:
-    #             self.chemical_space["compounds"][key] = {"structure": self._get_compound_(key)}
 
     def add_smiles(self, id2smiles):
         """Reads data in a form of list of lists (tuples)"""
@@ -553,38 +534,6 @@ class ChemSpace():
     def add_paths_from_file(self):
         pass
 
-    # def add_physico_chemical_properties(self):
-    #     print("Calculating physico-chemical properties: {} compounds".format(len(self.index2rdmol)))
-    #     self.pcp = True
-    #     if len(self.index2rdmol):
-    #         count = len(self.index2rdmol)
-    #         i = 0
-
-    #         id2pcp = {}
-    #         for index, rdmol in self.index2rdmol.items():
-    #             if i%100 == 0 or i == count:
-    #                 print("{}/{}".format(i, count))
-
-    #             id2pcp[index] = self._get_pcp_for_rdmol(rdmol)
-    #             i+=1
-
-    #         empty = [None for x in PROP2LABEL]
-    #         for i, index in enumerate(self.index_order):
-                
-    #             if id2pcp.get(index, False):
-    #                 pcps = id2pcp[index]
-    #             else:
-    #                 pcps = empty
-                
-    #             self.chemical_space["points"][index][self.KEYS.get("features", "features")].extend(pcps)
-
-    #         current_header = self.chemical_space.get("feature_names", [])
-    #         current_header.extend([PROP2LABEL[prop] for prop in PROPS_ORDER])
-    #         self.chemical_space["feature_names"] = current_header
-
-    # def _get_pcp_for_rdmol(self, rdmol):
-    #     return [round(PROP2FNC[prop](rdmol), 2) for prop in PROPS_ORDER]
-
     def add_physico_chemical_properties(self, show_progress=True):
         print(f"Calculating physico-chemical properties: {len(self.index2rdmol)} compounds")
         self.pcp = True
@@ -764,17 +713,6 @@ class ChemSpace():
         coords = isomap.fit_transform(data)
         return coords
 
-    def _multicore_tsne(self, data, **kwargs):
-        tsne = MulticoreTSNE(n_components=2, metric='precomputed', n_jobs=self.n_jobs)
-        coords = tsne.fit_transform(data)
-        return coords
-
-    # def _tsne(self, data, **kwargs):
-    #     tsne = manifold.TSNE(n_components=2, metric='precomputed')
-    #     coords = tsne.fit_transform(data)
-    #     coords = [[float(x[0]), float(x[1])] for x in coords]
-    #     return coords
-
     def _tsne(self, data, **kwargs):
         print("Calculating PCA: 50 components")
         pca = decomposition.PCA(n_components=50)
@@ -862,7 +800,7 @@ class ChemSpace():
         return coords
 
     def _mst_scaffolds(self, data, **kwargs):
-        edges = []
+        # edges = []
         only_edges = []
         weights = []
         scaffold_index2order = {si: i for i, si in enumerate(self.scaffold_index_order)}
@@ -882,19 +820,12 @@ class ChemSpace():
                 only_edges.append((e[0], e[1]))
                 weights.append(1)
 
-        # g = igraph.Graph.Weighted_Adjacency(self.dist_matrix.tolist(), mode="UNDIRECTED", attr="weight", loops=False)
-
-        # mst = g.spanning_tree(weights=g.es["weight"], return_tree=True)
-
         g = igraph.Graph(edges=only_edges, directed=False)
         g.es["weight"] = weights
 
         # Compute MST
         mst = g.spanning_tree(weights=g.es["weight"], return_tree=True)
         coords = sfdp_layout_mst(mst, weight_attr="weight")
-
-        # layout = mst.layout("kamada_kawai")
-        # coords = np.array(layout.coords)
 
         index2edges = defaultdict(dict)
         
