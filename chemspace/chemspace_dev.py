@@ -63,12 +63,14 @@ PROP2LABEL = {
 }
 
 FP2FNC = {
-    # "ecfp4": lambda rdmol: AllChem.GetMorganFingerprintAsBitVect(rdmol, radius=2, nBits=1024),
-    "ecfp6": lambda rdmol: AllChem.GetMorganFingerprintAsBitVect(rdmol, radius=3, nBits=1024),
-    "atompairs": lambda rdmol: AllChem.GetHashedAtomPairFingerprintAsBitVect(rdmol, nBits=1024),
-    "torsion": lambda rdmol: AllChem.GetHashedTopologicalTorsionFingerprintAsBitVect(rdmol, nBits=1024),
     "maccs": lambda rdmol: AllChem.GetMACCSKeysFingerprint(rdmol),
-    "ecfp4": rdFingerprintGenerator.GetMorganGenerator(radius=2,fpSize=1024)
+    "torsion": rdFingerprintGenerator.GetTopologicalTorsionGenerator(fpSize=1024),
+    "atompairs": rdFingerprintGenerator.GetAtomPairGenerator(fpSize=1024),
+    "ecfp4": rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=1024),
+    "ecfp6": rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024),
+    "fcfp4": rdFingerprintGenerator.GetMorganGenerator(
+        radius=2,fpSize=1024, atomInvariantsGenerator=rdFingerprintGenerator.GetMorganFeatureAtomInvGen()
+    )
 }
 
 METHODS = {
@@ -266,7 +268,7 @@ class ChemSpace():
             try:
                 Chem.SanitizeMol(m)
                 self.index2rdmol[mi] = m
-                self.index2fpobj[mi] = FP2FNC[self.fp](m)
+                self.index2fpobj[mi] = FP2FNC[self.fp].GetFingerprint(m)
                 self.index2props[mi] = m.GetPropsAsDict()
                 self.index2id[mi] = mi
                 mi += 1
