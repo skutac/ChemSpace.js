@@ -70,6 +70,9 @@ FP2FNC = {
     "ecfp6": rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024),
     "fcfp4": rdFingerprintGenerator.GetMorganGenerator(
         radius=2,fpSize=1024, atomInvariantsGenerator=rdFingerprintGenerator.GetMorganFeatureAtomInvGen()
+    ),
+    "fcfp6": rdFingerprintGenerator.GetMorganGenerator(
+        radius=3,fpSize=1024, atomInvariantsGenerator=rdFingerprintGenerator.GetMorganFeatureAtomInvGen()
     )
 }
 
@@ -108,7 +111,7 @@ METHODS = {
         "dm": True,
         "edges": True,
         "label": "Chemical Space Network",
-        "dim_label": "CNS"
+        "dim_label": "CSN"
     },
     "csn_scaffolds": {
         "dm": True,
@@ -733,8 +736,9 @@ class ChemSpace():
     def _csn(self, data, **kwargs):
         g = igraph.Graph(len(self.index_order))
         g.add_edges(self.edges)
-        layout = g.layout_fruchterman_reingold(weights=self.edges_weights if kwargs["weights"] else None)            
-        coords = layout.coords
+        # layout = g.layout_fruchterman_reingold(weights=self.edges_weights if kwargs["weights"] else None)            
+        # coords = layout.coords
+        coords = sfdp_layout_mst(g)
 
         for i, e in enumerate(self.edges):
             self.index2edges[e[0]][e[1]] = round(self.edges_weights[i], 2)
@@ -750,8 +754,9 @@ class ChemSpace():
         edges_weights = copy.copy(self.edges_weights)
         edges_weights.extend(self.scaffold_edges_weights)
 
-        layout = g.layout_fruchterman_reingold(weights=edges_weights if kwargs["weights"] else None)
-        coords = layout.coords
+        coords = sfdp_layout_mst(g)
+        # layout = g.layout_fruchterman_reingold(weights=edges_weights if kwargs["weights"] else None)
+        # coords = layout.coords
 
         for i, e in enumerate(self.edges):
             self.index2edges[e[0]][e[1]] = round(self.edges_weights[i], 2)
