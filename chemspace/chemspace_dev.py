@@ -18,7 +18,11 @@ try:
 except Exception as e:
     print(e)
 
-import pygraphviz as pgv
+try:
+    import pygraphviz as pgv
+except Exception as e:
+    print(e)
+
 import tempfile
 import igraph
 import jsmin
@@ -708,7 +712,7 @@ class ChemSpace():
 
     def _tsne(self, data, **kwargs):
         print("Calculating PCA: 50 components")
-        pca = decomposition.PCA(n_components=50)
+        pca = decomposition.PCA(n_components=50 if len(data) > 50 else len(data))
         data = pca.fit_transform(data)
         
         tsne = TSNE(
@@ -724,7 +728,7 @@ class ChemSpace():
 
     def _umap(self, data, **kwargs):
         print("Calculating PCA: 50 components")
-        pca = decomposition.PCA(n_components=50)
+        pca = decomposition.PCA(n_components=50 if len(data) > 50 else len(data))
         data = pca.fit_transform(data)
 
         # umap = UMAP(n_neighbors=20, min_dist=1, metric="jaccard")
