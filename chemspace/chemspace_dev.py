@@ -81,6 +81,12 @@ FP2FNC = {
 }
 
 METHODS = {
+    "none": {
+        "dm": False,
+        "edges": False,
+        "label": None,
+        "dim_label": None
+    },
     "pca": {
         "dm": False,
         "edges": False,
@@ -923,39 +929,39 @@ class ChemSpace():
                 else:
                     data = np.array([np.array(row) for row in self.data])
 
-            print(f"Calculating {METHODS[method]['label']}...")
-            feature_names = [f"{METHODS[method]['dim_label']} {i}" for i in [1, 2]]
-            coords = getattr(self, f"_{method}")(data, weights=weights)            
+            if method != "none":
+                print(f"Calculating {METHODS[method]['label']}...")
+                feature_names = [f"{METHODS[method]['dim_label']} {i}" for i in [1, 2]]
+                coords = getattr(self, f"_{method}")(data, weights=weights)            
 
-            if method in ["csn", "csn_weighted", "csn_scaffolds", "mst", "mst_scaffolds"] or self.add_edges:
-                # if self.dist_matrix is False and self.edges in [False, []]:
-                #     self._calculate_distance_matrix(similarity_threshold)
+                if method in ["csn", "csn_weighted", "csn_scaffolds", "mst", "mst_scaffolds"] or self.add_edges:
+                    # if self.dist_matrix is False and self.edges in [False, []]:
+                    #     self._calculate_distance_matrix(similarity_threshold)
 
-                # if self.edges in [False, []]:
-                #     if knn is None:
-                #         knn = len(self.index_order)
-                #     self._get_edges(similarity_threshold=similarity_threshold, knn=knn)
+                    # if self.edges in [False, []]:
+                    #     if knn is None:
+                    #         knn = len(self.index_order)
+                    #     self._get_edges(similarity_threshold=similarity_threshold, knn=knn)
+                    
+                    for cid, es in self.index2edges.items():
+                        if not self.chemical_space["points"][cid].get(self.KEYS.get("links", "links"), False):
+                            self.chemical_space["points"][cid][self.KEYS.get("links", "links")] = []
+                        for e, weight in es.items():
+                            self.chemical_space["points"][cid][self.KEYS.get("links", "links")].append([e, weight])
+                    
+                index2coords = {index:coords[i] for i, index in enumerate(self.index_order)}
                 
-                for cid, es in self.index2edges.items():
-                    if not self.chemical_space["points"][cid].get(self.KEYS.get("links", "links"), False):
-                        self.chemical_space["points"][cid][self.KEYS.get("links", "links")] = []
-                    for e, weight in es.items():
-                        self.chemical_space["points"][cid][self.KEYS.get("links", "links")].append([e, weight])
-                
-            index2coords = {index:coords[i] for i, index in enumerate(self.index_order)}
+                for index, values in self.chemical_space["points"].items():
+                    if index in index2coords:
+                        point_features = self.chemical_space["points"][index][self.KEYS.get("features", "features")]
+                        features = [round(index2coords[index][0], 5), round(index2coords[index][1], 5)]
+                        features.extend(point_features)
+                        self.chemical_space["points"][index][self.KEYS.get("features", "features")] = features
+                    else:
+                        self.chemical_space["points"].pop(index, None)
             
-            for index, values in self.chemical_space["points"].items():
-                if index in index2coords:
-                    point_features = self.chemical_space["points"][index][self.KEYS.get("features", "features")]
-                    features = [round(index2coords[index][0], 5), round(index2coords[index][1], 5)]
-                    # features = [index2coords[index][0], index2coords[index][1]]
-                    features.extend(point_features)
-                    self.chemical_space["points"][index][self.KEYS.get("features", "features")] = features
-                else:
-                    self.chemical_space["points"].pop(index, None)
-            
-            feature_names.extend(self.chemical_space.get("feature_names", []))
-            self.chemical_space["feature_names"] = feature_names
+                feature_names.extend(self.chemical_space.get("feature_names", []))
+                self.chemical_space["feature_names"] = feature_names
 
     def _arrange_by_scaffolds(self, align_by_scaffold=True):
         self.scaffold2indexes = {}
