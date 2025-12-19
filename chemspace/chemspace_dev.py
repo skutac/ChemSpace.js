@@ -717,9 +717,7 @@ class ChemSpace():
         return coords
 
     def _tsne(self, data, **kwargs):
-        print("Calculating PCA: 50 components")
-        pca = decomposition.PCA(n_components=50 if len(data) > 50 else len(data))
-        data = pca.fit_transform(data)
+        data = self.pca50 if self.pca50 is not None else self._pca50(data)
         
         tsne = TSNE(
             perplexity=30,
@@ -732,10 +730,14 @@ class ChemSpace():
         coords = [[float(x[0]), float(x[1])] for x in coords]
         return coords
 
-    def _umap(self, data, **kwargs):
-        print("Calculating PCA: 50 components")
+    def _pca50(self, data):
+        print("Calculating PCA [50 components]...")
         pca = decomposition.PCA(n_components=50 if len(data) > 50 else len(data))
-        data = pca.fit_transform(data)
+        self.pca50 = pca.fit_transform(data)
+        return self.pca50
+
+    def _umap(self, data, **kwargs):
+        data = self.pca50 if self.pca50 is not None else self._pca50(data)
 
         # umap = UMAP(n_neighbors=20, min_dist=1, metric="jaccard")
         umap = UMAP(n_neighbors=30, min_dist=1, metric="euclidean")
@@ -840,6 +842,7 @@ class ChemSpace():
 
     def arrange(self, by="fps", fps=None, method="pca", similarity_threshold=0.7, add_edges=None, weights=False, knn=None, add_scaffolds_category=False, only_scaffolds=False):
         self.dist_matrix = False
+        self.pca50 = None
         self.edges = []
         self.edges_weights = []
         self.index2edges = defaultdict(dict)
@@ -944,14 +947,17 @@ class ChemSpace():
                     #     self._get_edges(similarity_threshold=similarity_threshold, knn=knn)
                     
                     for cid, es in self.index2edges.items():
+                        
                         if not self.chemical_space["points"][cid].get(self.KEYS.get("links", "links"), False):
                             self.chemical_space["points"][cid][self.KEYS.get("links", "links")] = []
+
                         for e, weight in es.items():
                             self.chemical_space["points"][cid][self.KEYS.get("links", "links")].append([e, weight])
                     
                 index2coords = {index:coords[i] for i, index in enumerate(self.index_order)}
                 
                 for index, values in self.chemical_space["points"].items():
+                    
                     if index in index2coords:
                         point_features = self.chemical_space["points"][index][self.KEYS.get("features", "features")]
                         features = [round(index2coords[index][0], 5), round(index2coords[index][1], 5)]
