@@ -736,6 +736,15 @@ class ChemSpace():
         self.pca50 = pca.fit_transform(data)
         return self.pca50
 
+    def _umap50(self, data=None):
+        print("Calculating UMAP [50 components]...")
+        if data is None:
+            data = self.pca50 if self.pca50 is not None else self._pca50(data)
+        
+        umap = UMAP(n_components=50, n_neighbors=30, min_dist=0.1, metric="euclidean")
+        self.umap50 = umap.fit_transform(data)
+        return self.umap50
+
     def _umap(self, data, **kwargs):
         data = self.pca50 if self.pca50 is not None else self._pca50(data)
 
@@ -843,6 +852,7 @@ class ChemSpace():
     def arrange(self, by="fps", fps=None, method="pca", similarity_threshold=0.7, add_edges=None, weights=False, knn=None, add_scaffolds_category=False, only_scaffolds=False):
         self.dist_matrix = False
         self.pca50 = None
+        self.umap50 = None
         self.edges = []
         self.edges_weights = []
         self.index2edges = defaultdict(dict)
