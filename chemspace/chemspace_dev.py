@@ -696,9 +696,9 @@ class ChemSpace():
         return bitvect
 
     def _pca(self, data, **kwargs):
-        pca = decomposition.PCA(n_components=2)
-        coords = pca.fit_transform(data)
-        return coords
+        # data = self.pca50 if self.pca50 is not None else self._pca50(data)
+        # coords = pca.fit_transform(data)
+        return self.pca50 if self.pca50 is not None else self._pca50(data)
 
     def _mds(self, data, **kwargs):
         # sklearn implementation
@@ -732,7 +732,7 @@ class ChemSpace():
 
     def _pca50(self, data):
         print("Calculating PCA [50 components]...")
-        pca = decomposition.PCA(n_components=50 if len(data) > 50 else len(data))
+        pca = decomposition.PCA(n_components=50 if len(data) > 50 else len(data), svd_solver="full")
         self.pca50 = pca.fit_transform(data)
         return self.pca50
 
