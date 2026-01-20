@@ -741,7 +741,11 @@ class ChemSpace():
         if data is None:
             data = self.pca50 if self.pca50 is not None else self._pca50(data)
         
-        umap = UMAP(n_components=50, n_neighbors=30, min_dist=0.1, metric="euclidean")
+        umap = UMAP(
+            n_components=50 if len(data) > 50 else int(len(data)/2), 
+            n_neighbors=30 if len(data) > 30 else len(data),
+            min_dist=0.1, metric="euclidean"
+        )
         self.umap50 = umap.fit_transform(data)
         return self.umap50
 
