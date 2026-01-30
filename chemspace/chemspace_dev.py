@@ -192,14 +192,27 @@ def sfdp_layout_mst(igraph_graph):
 
     with tempfile.NamedTemporaryFile(suffix=".dot") as tmpfile:
         igraph_graph.write_dot(tmpfile.name)
-        print("Calculating sdfp (MST) layout...")
+        print("Calculating sfdp (MST) layout...")
+
         A = pgv.AGraph(tmpfile.name)
 
+        A.graph_attr.update({
+            "splines": "true",
+            "smoothing": "triangle",
+        })
+
         print("Computing layout...")
-        A.layout(prog="sfdp", args="-Gsmoothing=triangle")
-        
-        # Extract coordinates
+        try:
+            A.layout(prog="sfdp")
+        except Exception:
+            A.layout(
+                prog="sfdp",
+                args="-Gsplines=true -Gsmoothing=triangle"
+            )
+
         for node in A.nodes():
+            if "pos" not in node.attr:
+                continue
             x, y = map(float, node.attr["pos"].split(","))
             coords[int(node)] = (x, y)
 
