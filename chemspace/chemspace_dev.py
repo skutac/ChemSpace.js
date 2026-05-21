@@ -1,11 +1,17 @@
-import csv, argparse, copy, re, os, requests, time
-import simplejson as json
+import argparse
+import copy
+import csv
+import os
+import re
+import time
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
+import requests
+import simplejson as json
 from scipy.spatial import distance
-from sklearn import manifold, metrics, decomposition, preprocessing
+from sklearn import decomposition, manifold, metrics, preprocessing
 from sklearn.impute import SimpleImputer
 
 try:
@@ -24,18 +30,40 @@ except Exception as e:
     print(e)
 
 import tempfile
+
 import igraph
 import jsmin
-
 import rdkit
 from rdkit import Chem, DataStructs, Geometry
-from rdkit.DataStructs import cDataStructs
-from rdkit.Chem import Draw, AllChem, Scaffolds, Lipinski,\
-    Crippen, rdMolDescriptors, TemplateAlign, QED, rdFingerprintGenerator
+from rdkit.Chem import (
+    QED,
+    AllChem,
+    Crippen,
+    Draw,
+    Lipinski,
+    Scaffolds,
+    TemplateAlign,
+    rdFingerprintGenerator,
+    rdMolDescriptors,
+)
 from rdkit.Chem.Scaffolds import MurckoScaffold
+from rdkit.DataStructs import cDataStructs
 
-PROPS_ORDER = ["mw", "hba", "hbd", "rb", "rc", "arc", "hc", "logp", "tpsa", "fcsp3", "ncc", "qed"]
-        
+PROPS_ORDER = [
+    "mw",
+    "hba",
+    "hbd",
+    "rb",
+    "rc",
+    "arc",
+    "hc",
+    "logp",
+    "tpsa",
+    "fcsp3",
+    "ncc",
+    "qed",
+]
+
 PROP2FNC = {
     "mw": rdMolDescriptors.CalcExactMolWt,
     "hba": Lipinski.NumHAcceptors,
@@ -44,11 +72,11 @@ PROP2FNC = {
     "rc": Lipinski.RingCount,
     "hc": rdMolDescriptors.CalcNumHeteroatoms,
     "arc": Lipinski.NumAromaticRings,
-    "logp": Crippen.MolLogP, 
+    "logp": Crippen.MolLogP,
     "tpsa": rdMolDescriptors.CalcTPSA,
     "fcsp3": rdMolDescriptors.CalcFractionCSP3,
     "ncc": lambda m: len(Chem.FindMolChiralCenters(m, includeUnassigned=True)),
-    "qed": QED.default
+    "qed": QED.default,
 }
 
 PROP2LABEL = {
@@ -73,85 +101,83 @@ FP2FNC = {
     "ecfp4": rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=1024),
     "ecfp6": rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024),
     "fcfp4": rdFingerprintGenerator.GetMorganGenerator(
-        radius=2,fpSize=1024, atomInvariantsGenerator=rdFingerprintGenerator.GetMorganFeatureAtomInvGen()
+        radius=2,
+        fpSize=1024,
+        atomInvariantsGenerator=rdFingerprintGenerator.GetMorganFeatureAtomInvGen(),
     ),
     "fcfp6": rdFingerprintGenerator.GetMorganGenerator(
-        radius=3,fpSize=1024, atomInvariantsGenerator=rdFingerprintGenerator.GetMorganFeatureAtomInvGen()
-    )
+        radius=3,
+        fpSize=1024,
+        atomInvariantsGenerator=rdFingerprintGenerator.GetMorganFeatureAtomInvGen(),
+    ),
 }
 
 METHODS = {
-    "none": {
-        "dm": False,
-        "edges": False,
-        "label": None,
-        "dim_label": None
-    },
+    "none": {"dm": False, "edges": False, "label": None, "dim_label": None},
     "pca": {
         "dm": False,
         "edges": False,
         "label": "Principal Components Analysis",
-        "dim_label": "PCA"
+        "dim_label": "PCA",
     },
     "mds": {
         "dm": False,
         "edges": False,
         "label": "Multi-dimensional Scaling",
-        "dim_label": "MDS"
+        "dim_label": "MDS",
     },
-    "umap": {
-        "dm": False,
-        "edges": False,
-        "label": "UMAP",
-        "dim_label": "UMAP"
-    },
-    "tsne": {
-        "dm": False,
-        "edges": False,
-        "label": "t-SNE",
-        "dim_label": "t-SNE"
-    },
+    "umap": {"dm": False, "edges": False, "label": "UMAP", "dim_label": "UMAP"},
+    "tsne": {"dm": False, "edges": False, "label": "t-SNE", "dim_label": "t-SNE"},
     "multicore_tsne": {
         "dm": False,
         "edges": False,
         "label": "t-SNE",
-        "dim_label": "t-SNE"
+        "dim_label": "t-SNE",
     },
     "csn": {
         "dm": True,
         "edges": True,
         "label": "Chemical Space Network",
-        "dim_label": "CSN"
+        "dim_label": "CSN",
     },
     "csn_scaffolds": {
         "dm": True,
         "edges": True,
         "label": "Scaffold Chemical Space Network",
-        "dim_label": "Scaffold CSN"
+        "dim_label": "Scaffold CSN",
     },
     "nn": {
         "dm": True,
         "edges": False,
         "label": "Nearest Neighbours",
-        "dim_label": "NN"
+        "dim_label": "NN",
     },
     "mst": {
         "dm": True,
         "edges": True,
         "label": "Minimum Spanning Tree",
-        "dim_label": "MST"
+        "dim_label": "MST",
     },
     "mst_scaffolds": {
         "dm": True,
         "edges": True,
         "label": "Minimum Scaffold Spanning Tree",
-        "dim_label": "Scaffold MST"
+        "dim_label": "Scaffold MST",
     },
 }
 
 AVAILABLE_METRICS = [
-    "Tanimoto", "Dice", "Cosine", "Sokal", "Russel", "RogotGoldberg", 
-    "AllBit", "Kulczynski", "McConnaughey", "Asymmetric", "BraunBlanquet"
+    "Tanimoto",
+    "Dice",
+    "Cosine",
+    "Sokal",
+    "Russel",
+    "RogotGoldberg",
+    "AllBit",
+    "Kulczynski",
+    "McConnaughey",
+    "Asymmetric",
+    "BraunBlanquet",
 ]
 
 DATA_KEYS = {
@@ -161,9 +187,10 @@ DATA_KEYS = {
         "object_ids": "o",
         "smiles": "s",
         "label": "l",
-        "links": "ls"
-    }
+        "links": "ls",
+    },
 }
+
 
 def _pcp_worker(item):
     """Worker function to compute physico-chemical properties for one molecule."""
@@ -173,6 +200,7 @@ def _pcp_worker(item):
     except Exception:
         pcps = [None for _ in props_order]
     return index, pcps
+
 
 def sfdp_layout_mst(igraph_graph):
     """
@@ -196,19 +224,18 @@ def sfdp_layout_mst(igraph_graph):
 
         A = pgv.AGraph(tmpfile.name)
 
-        A.graph_attr.update({
-            "splines": "true",
-            "smoothing": "triangle",
-        })
+        A.graph_attr.update(
+            {
+                "splines": "true",
+                "smoothing": "triangle",
+            }
+        )
 
         print("Computing layout...")
         try:
             A.layout(prog="sfdp")
         except Exception:
-            A.layout(
-                prog="sfdp",
-                args="-Gsplines=true -Gsmoothing=triangle"
-            )
+            A.layout(prog="sfdp", args="-Gsplines=true -Gsmoothing=triangle")
 
         for node in A.nodes():
             if "pos" not in node.attr:
@@ -220,14 +247,25 @@ def sfdp_layout_mst(igraph_graph):
 
     return coords
 
-class ChemSpace():
 
+class ChemSpace:
     def __init__(
-            self, category_field = False, category_field_delimiter = False, label_field = False, 
-            compound_structure_field = False, write_structures = True, fp = "ecfp4", 
-            fingerprint_field = False, metric = "Tanimoto", pcp = False, compressed_data_format=False, 
-            round_values=False, data_as_features=True, n_jobs=1, keep_unparsable_structures=False
-        ):
+        self,
+        category_field=False,
+        category_field_delimiter=False,
+        label_field=False,
+        compound_structure_field=False,
+        write_structures=True,
+        fp="ecfp4",
+        fingerprint_field=False,
+        metric="Tanimoto",
+        pcp=False,
+        compressed_data_format=False,
+        round_values=False,
+        data_as_features=True,
+        n_jobs=1,
+        keep_unparsable_structures=False,
+    ):
         self.category_field = category_field
         self.category_field_delimiter = category_field_delimiter
         self.label_field = label_field
@@ -242,7 +280,11 @@ class ChemSpace():
         self.data_as_features = data_as_features
         self.keep_unparsable_structures = keep_unparsable_structures
         self.n_jobs = n_jobs
-        self.KEYS = DATA_KEYS["default"] if not compressed_data_format else DATA_KEYS["compressed"]
+        self.KEYS = (
+            DATA_KEYS["default"]
+            if not compressed_data_format
+            else DATA_KEYS["compressed"]
+        )
 
         # if self.metric not in AVAILABLE_METRICS:
         #     raise Exception("Metric '{}' not found in available similarity metrics: {}".format(self.metric, AVAILABLE_METRICS))
@@ -250,18 +292,36 @@ class ChemSpace():
         self.index2rdmol = {}
         self.index2fpobj = {}
 
-    def read_file(self, filename, delimiter=",", header=False, missing_value=False, remove_columns=False):
+    def read_file(
+        self,
+        filename,
+        delimiter=",",
+        header=False,
+        missing_values=False,
+        remove_columns=False,
+    ):
         ext = filename.split(".")[-1].lower()
 
         if ext in ["csv", "sdf"]:
             if ext == "csv":
-                self.read_csv(filename, delimiter, header, missing_value, remove_columns)
+                self.read_csv(
+                    filename, delimiter, header, missing_values, remove_columns
+                )
             else:
                 self.read_sdf(filename)
         else:
-            raise Exception(f"Input file must be of type: csv, sdf. Input file: {filename}")
+            raise Exception(
+                f"Input file must be of type: csv, sdf. Input file: {filename}"
+            )
 
-    def read_csv(self, filename, delimiter=",", header=False, missing_value=False, remove_columns=False):
+    def read_csv(
+        self,
+        filename,
+        delimiter=",",
+        header=False,
+        missing_values=False,
+        remove_columns=False,
+    ):
         """Reads data from the CSV file"""
         print("Reading file: {}".format(filename))
 
@@ -269,8 +329,8 @@ class ChemSpace():
         with open(self.filename, "r") as input_file:
             reader = csv.reader(input_file, delimiter=delimiter)
             rows = [row for row in reader]
-        
-        self.read_data(rows, header, missing_value, remove_columns)
+
+        self.read_data(rows, header, missing_values, remove_columns)
 
     def read_sdf(self, filename):
         """Reads data from a sdf file"""
@@ -307,13 +367,27 @@ class ChemSpace():
         self.index_order.sort()
         self.index2row = {i: [] for i in self.index_order}
         self.data = list(self.index2row.values())
-        
-        if self.label_field is not False and self.label_field in self.index2props[self.index_order[0]]:
-            self.index2label = {i: self.index2props[i].get(self.label_field) for i in self.index_order}
-            self.index2label = {key: val if val not in [None, ""] else self.index2id[key] for key, val in self.index2label.items()}
 
-        if self.category_field is not False and self.category_field in self.index2props[self.index_order[0]]:
-            self.index2category = {i: self.index2props[i].get(self.category_field) for i in self.index_order}
+        if (
+            self.label_field is not False
+            and self.label_field in self.index2props[self.index_order[0]]
+        ):
+            self.index2label = {
+                i: self.index2props[i].get(self.label_field) for i in self.index_order
+            }
+            self.index2label = {
+                key: val if val not in [None, ""] else self.index2id[key]
+                for key, val in self.index2label.items()
+            }
+
+        if (
+            self.category_field is not False
+            and self.category_field in self.index2props[self.index_order[0]]
+        ):
+            self.index2category = {
+                i: self.index2props[i].get(self.category_field)
+                for i in self.index_order
+            }
 
         self._create_chemspace_format()
 
@@ -340,12 +414,14 @@ class ChemSpace():
         for key, value in self.chemical_space["points"].items():
             for i in value[self.KEYS.get("object_ids", "object_ids")]:
                 if i in id2smiles:
-                    self.chemical_space["compounds"][key] = {self.KEYS.get("smiles", "smiles"): id2smiles[i]}
+                    self.chemical_space["compounds"][key] = {
+                        self.KEYS.get("smiles", "smiles"): id2smiles[i]
+                    }
 
-    def read_data(self, rows, header=False, missing_value=False, remove_columns=False):
+    def read_data(self, rows, header=False, missing_values=False, remove_columns=False):
         """Reads data in a form of list of lists (tuples)"""
         self.header = header
-        self.missing_value = missing_value
+        self.missing_values = missing_values
         data_start = 0
 
         self.data = rows
@@ -360,13 +436,16 @@ class ChemSpace():
             self.data = self.data[1:]
 
         self.index2id = {i: row[0] for i, row in enumerate(self.data)}
-        
+
         if self.header:
             if remove_columns is not False and len(remove_columns) > 0:
                 for col in remove_columns:
                     self._remove_field(col)
 
-            if self.compound_structure_field and self.compound_structure_field in self.header:
+            if (
+                self.compound_structure_field
+                and self.compound_structure_field in self.header
+            ):
                 print("Extracting structure field")
                 self.index2compound = self._extract_field(self.compound_structure_field)
                 self._read_compounds()
@@ -374,7 +453,12 @@ class ChemSpace():
             if self.label_field and self.label_field in self.header:
                 print("Extracting label field")
                 self.index2label = self._extract_field(self.label_field)
-                self.index2label = {key: val if not self.index2label.get(key, False) else self.index2label[key] for key, val in self.index2id.items()}
+                self.index2label = {
+                    key: val
+                    if not self.index2label.get(key, False)
+                    else self.index2label[key]
+                    for key, val in self.index2id.items()
+                }
 
             if self.category_field and self.category_field in self.header:
                 print("Extracting category field")
@@ -391,22 +475,40 @@ class ChemSpace():
             self.header.pop(0)
 
         if self.round_values is not False:
-            self.index2row = {i: [round(float(v), self.round_values) if v not in ["", None, "None", self.missing_value] else None for v in row[1:]] for i, row in enumerate(self.data)}
+            self.index2row = {
+                i: [
+                    round(float(v), self.round_values)
+                    if v not in ["", None, "None", *self.missing_values]
+                    else None
+                    for v in row[1:]
+                ]
+                for i, row in enumerate(self.data)
+            }
         else:
-            self.index2row = {i: [float(v) if v not in ["", None, "None", self.missing_value] else None for v in row[1:]] for i, row in enumerate(self.data)}
-        
+            self.index2row = {
+                i: [
+                    float(v)
+                    if v not in ["", None, "None", *self.missing_values]
+                    else None
+                    for v in row[1:]
+                ]
+                for i, row in enumerate(self.data)
+            }
+
         if len(self.index2rdmol) > 0 and not self.keep_unparsable_structures:
             self.index_order = list(self.index2rdmol.keys())
             self.index_order.sort()
         else:
             self.index_order = [i for i, row in enumerate(self.data)]
-        
+
         self.original_data = copy.deepcopy(list(self.index2row.values()))
         self.data = [self.index2row[i] for i in self.index_order]
-        
-        if self.missing_value is not False and len(self.data[0]) > 0:
-            self.data, self.missing_values_indexes = self._impute_missing_values(self.data)
-        
+
+        if self.missing_values is not False and len(self.data[0]) > 0:
+            self.data, self.missing_values_indexes = self._impute_missing_values(
+                self.data
+            )
+
         self._create_chemspace_format()
 
     def _read_compounds(self):
@@ -458,27 +560,27 @@ class ChemSpace():
 
     def _impute_missing_values(self, data):
         datatype2impute = {
-            "numeric": {
-                "strategy":"mean", 
-                "value": lambda x: round(float(value), 3)
-            }, 
-            "binary": {
-                "strategy":"most_frequent", 
-                "value": lambda x: int(value)
-            }
+            "numeric": {"strategy": "mean", "value": lambda x: round(float(value), 3)},
+            "binary": {"strategy": "most_frequent", "value": lambda x: int(value)},
         }
 
         missing_values_indexes = []
-        
+
         for i, row in enumerate(self.data):
-            missing_values_indexes.append([j for j, v in enumerate(row) if v == self.missing_value])
+            missing_values_indexes.append(
+                [j for j, v in enumerate(row) if v in self.missing_values]
+            )
 
             for j, value in enumerate(row):
-                if value == self.missing_value:
+                if value == self.missing_values:
                     data[i][j] = np.nan
 
-        imputer = SimpleImputer(missing_values=np.nan, strategy=datatype2impute["numeric"]["strategy"], keep_empty_features=True)
-        #error when using median strategy - minus one dimension in imputed data... omg
+        imputer = SimpleImputer(
+            missing_values=np.nan,
+            strategy=datatype2impute["numeric"]["strategy"],
+            keep_empty_features=True,
+        )
+        # error when using median strategy - minus one dimension in imputed data... omg
         imputed_data = [list(row) for row in imputer.fit_transform(self.data)]
         # imputed_data = [[datatype2impute["numeric"]["value"](value) for value in row] for row in imputed_data]
         return imputed_data, missing_values_indexes
@@ -495,22 +597,30 @@ class ChemSpace():
         self.chemical_space = {"points": {}}
 
         for index in self.index_order:
-            self.chemical_space["points"][index] = {self.KEYS.get("object_ids", "object_ids"): [str(self.index2id[index])]}
+            self.chemical_space["points"][index] = {
+                self.KEYS.get("object_ids", "object_ids"): [str(self.index2id[index])]
+            }
 
         if len(self.index2category):
             self._parse_categories()
 
         if len(self.index2label):
             for index in self.index_order:
-                self.chemical_space["points"][index][self.KEYS.get("label", "label")] = self.index2label[index]
-        
+                self.chemical_space["points"][index][
+                    self.KEYS.get("label", "label")
+                ] = self.index2label[index]
+
         if self.data_as_features:
             for index in self.index_order:
-                self.chemical_space["points"][index][self.KEYS.get("features", "features")] = copy.copy(self.index2row[index])
+                self.chemical_space["points"][index][
+                    self.KEYS.get("features", "features")
+                ] = copy.copy(self.index2row[index])
 
         else:
             for index in self.index_order:
-                self.chemical_space["points"][index][self.KEYS.get("features", "features")] = []
+                self.chemical_space["points"][index][
+                    self.KEYS.get("features", "features")
+                ] = []
 
         if self.header and self.data_as_features:
             current_header = self.chemical_space.get("feature_names", [])
@@ -522,28 +632,36 @@ class ChemSpace():
 
             for index, rdmol in self.index2rdmol.items():
                 if rdmol is not None:
-                    self.chemical_space["compounds"][self.index2id[index]] = {self.KEYS.get("smiles", "smiles"): Chem.MolToSmiles(rdmol, True)}
+                    self.chemical_space["compounds"][self.index2id[index]] = {
+                        self.KEYS.get("smiles", "smiles"): Chem.MolToSmiles(rdmol, True)
+                    }
 
     def _parse_categories(self):
         category2ids = {}
-        
+
         for index, category in self.index2category.items():
             if self.category_field_delimiter is False:
-                categories = [category] 
+                categories = [category]
             else:
-                categories = [c.strip() for c in category.split(self.category_field_delimiter) if c.strip() != ""]
+                categories = [
+                    c.strip()
+                    for c in category.split(self.category_field_delimiter)
+                    if c.strip() != ""
+                ]
 
             for c in categories:
                 if c in category2ids:
                     category2ids[c].add(self.index2id[index])
                 else:
                     category2ids[c] = {self.index2id[index]}
-        
+
         if not "categories" in self.chemical_space:
             self.chemical_space["categories"] = []
 
         for c, ids in category2ids.items():
-            self.chemical_space["categories"].append({self.KEYS.get("label", "label"): c, "objects": list(ids)})
+            self.chemical_space["categories"].append(
+                {self.KEYS.get("label", "label"): c, "objects": list(ids)}
+            )
 
     def add_paths(self, paths):
         if not self.chemical_space.get("paths", False):
@@ -555,7 +673,9 @@ class ChemSpace():
         pass
 
     def add_physico_chemical_properties(self, show_progress=True):
-        print(f"Calculating physico-chemical properties: {len(self.index2rdmol)} compounds")
+        print(
+            f"Calculating physico-chemical properties: {len(self.index2rdmol)} compounds"
+        )
         self.pcp = True
 
         if not len(self.index2rdmol):
@@ -572,6 +692,7 @@ class ChemSpace():
 
             if show_progress:
                 from tqdm import tqdm
+
                 futures_iter = tqdm(as_completed(futures), total=len(futures))
             else:
                 futures_iter = as_completed(futures)
@@ -589,14 +710,16 @@ class ChemSpace():
         # Attach results to self.chemical_space
         for index in self.index_order:
             pcps = id2pcp.get(index, empty)
-            self.chemical_space["points"][index][self.KEYS.get("features", "features")].extend(pcps)
+            self.chemical_space["points"][index][
+                self.KEYS.get("features", "features")
+            ].extend(pcps)
 
         # Update headers
         current_header = self.chemical_space.get("feature_names", [])
         current_header.extend([PROP2LABEL[prop] for prop in PROPS_ORDER])
         self.chemical_space["feature_names"] = current_header
 
-    def normalize_data(self, feature_range=(0,1)):
+    def normalize_data(self, feature_range=(0, 1)):
         """Normalizes data to a scale from 0 to 1."""
         print("Data normalization (scale): {}".format(feature_range))
 
@@ -604,27 +727,38 @@ class ChemSpace():
         self.data = min_max_scaler.fit_transform(self.data)
         self.data = [[round(v, 3) for v in row] for row in self.data]
 
-    def _calculate_distance_matrix(self, index_order=None, index2order=None, method=None):
+    def _calculate_distance_matrix(
+        self, index_order=None, index2order=None, method=None
+    ):
         start = time.time()
         if index_order is None:
             index_order = self.index_order
 
         if index2order is None:
             index2order = {x: i for i, x in enumerate(self.index_order)}
-        
+
         print("\nCalculating distance matrix: {} compounds".format(len(index_order)))
-        
+
         fps = np.array([self.index2fpobj[index].ToList() for index in index_order])
-        self.dist_matrix = metrics.pairwise_distances(fps, metric=self.metric, n_jobs=self.n_jobs)
+        self.dist_matrix = metrics.pairwise_distances(
+            fps, metric=self.metric, n_jobs=self.n_jobs
+        )
         end = time.time()
         print("DM SKLEARN:", end - start)
 
-    def _get_edges(self, similarity_threshold=0.7, knn=2, index_order=None, index2order=None, method=None):
+    def _get_edges(
+        self,
+        similarity_threshold=0.7,
+        knn=2,
+        index_order=None,
+        index2order=None,
+        method=None,
+    ):
         start = time.time()
         self.edges = []
         self.edges_weights = []
         self.index2edges = defaultdict(dict)
-        
+
         if knn is None:
             knn = 0
 
@@ -633,37 +767,49 @@ class ChemSpace():
 
         if index2order is None:
             index2order = {x: i for i, x in enumerate(index_order)}
-        
+
         count = len(index_order)
-        print(f"\nCalculating edges [similarity threshold={similarity_threshold}, knn={knn}]: {count} compounds")
+        print(
+            f"\nCalculating edges [similarity threshold={similarity_threshold}, knn={knn}]: {count} compounds"
+        )
         # print("DM INDEXES MATCH", len(index_order) == len(self.dist_matrix))
         self.dist_matrix = 1 - self.dist_matrix
         dims = len(self.dist_matrix)
 
         if similarity_threshold == 0 and knn == 0:
             print("Get all edges...")
-            
+
             for i, index in enumerate(index_order, 0):
-                if i%100 == 0:
+                if i % 100 == 0:
                     print("{}/{}".format(i, count))
 
-                if i == dims-1:
+                if i == dims - 1:
                     break
 
-                self.edges.extend([(index2order[index], index2order[idx]) for idx in index_order[i+1:]])
-                self.edges_weights.extend([self.dist_matrix[i][j] for j, idx in enumerate(index_order[i+1:], i+1)])
+                self.edges.extend(
+                    [
+                        (index2order[index], index2order[idx])
+                        for idx in index_order[i + 1 :]
+                    ]
+                )
+                self.edges_weights.extend(
+                    [
+                        self.dist_matrix[i][j]
+                        for j, idx in enumerate(index_order[i + 1 :], i + 1)
+                    ]
+                )
 
         elif knn == 0:
             for i, index in enumerate(index_order, 0):
-                if i%100 == 0:
+                if i % 100 == 0:
                     print("{}/{}".format(i, count))
 
-                if i == dims-1:
+                if i == dims - 1:
                     break
 
-                for j, idx in enumerate(index_order[i+1:], i+1):
+                for j, idx in enumerate(index_order[i + 1 :], i + 1):
                     sim = self.dist_matrix[i][j]
-                    
+
                     if sim >= similarity_threshold:
                         self.edges.append((index2order[index], index2order[idx]))
                         self.edges_weights.append(sim)
@@ -671,16 +817,15 @@ class ChemSpace():
         else:
             index2edges = defaultdict(list)
             for i, index in enumerate(index_order, 0):
-
-                if i%100 == 0:
+                if i % 100 == 0:
                     print("{}/{}".format(i, count))
 
-                if i == dims-1:
+                if i == dims - 1:
                     break
 
-                for j, idx in enumerate(index_order[i+1:], i+1):
+                for j, idx in enumerate(index_order[i + 1 :], i + 1):
                     sim = self.dist_matrix[i][j]
-                    
+
                     if sim >= similarity_threshold:
                         index2edges[index2order[index]].append((index2order[idx], sim))
                         index2edges[index2order[idx]].append((index2order[index], sim))
@@ -690,11 +835,11 @@ class ChemSpace():
 
                 self.edges.extend([(index, x[0]) for x in edges[-knn:]])
                 self.edges_weights.extend([x[1] for x in edges[-knn:]])
-                    
+
         end = time.time()
         print("GET EDGES:", end - start)
         print("EDGES: {}".format(len(self.edges)))
-        
+
     def _convert_fps_to_bitvects(self, fps):
         self.index2fpobj = {}
         for i, fp in enumerate(fps):
@@ -715,7 +860,7 @@ class ChemSpace():
 
     def _mds(self, data, **kwargs):
         # sklearn implementation
-        mds = manifold.MDS(n_components=2, dissimilarity='precomputed')
+        mds = manifold.MDS(n_components=2, dissimilarity="precomputed")
         coords = mds.fit_transform(data)
         return coords
 
@@ -731,7 +876,7 @@ class ChemSpace():
 
     def _tsne(self, data, **kwargs):
         data = self.pca50 if self.pca50 is not None else self._pca50(data)
-        
+
         tsne = TSNE(
             perplexity=30,
             metric="euclidean",
@@ -745,7 +890,9 @@ class ChemSpace():
 
     def _pca50(self, data):
         print("Calculating PCA [50 components]...")
-        pca = decomposition.PCA(n_components=50 if len(data) > 50 else len(data), svd_solver="full")
+        pca = decomposition.PCA(
+            n_components=50 if len(data[0]) > 50 else len(data[0]), svd_solver="full"
+        )
         self.pca50 = pca.fit_transform(data)
         return self.pca50
 
@@ -753,11 +900,12 @@ class ChemSpace():
         print("Calculating UMAP [50 components]...")
         if data is None:
             data = self.pca50 if self.pca50 is not None else self._pca50(data)
-        
+
         umap = UMAP(
-            n_components=50 if len(data) > 50 else int(len(data)/2), 
+            n_components=50 if len(data) > 50 else int(len(data) / 2),
             n_neighbors=30 if len(data) > 30 else len(data),
-            min_dist=0.1, metric="euclidean"
+            min_dist=0.1,
+            metric="euclidean",
         )
         self.umap50 = umap.fit_transform(data)
         return self.umap50
@@ -768,13 +916,15 @@ class ChemSpace():
         # umap = UMAP(n_neighbors=20, min_dist=1, metric="jaccard")
         umap = UMAP(n_neighbors=30, min_dist=1, metric="euclidean")
         coords = umap.fit_transform(data)
-        coords = [[float(x[0]), float(x[1])] if not np.isnan(x[0]) else [0, 0] for x in coords]
+        coords = [
+            [float(x[0]), float(x[1])] if not np.isnan(x[0]) else [0, 0] for x in coords
+        ]
         return coords
 
     def _csn(self, data, **kwargs):
         g = igraph.Graph(len(self.index_order))
         g.add_edges(self.edges)
-        # layout = g.layout_fruchterman_reingold(weights=self.edges_weights if kwargs["weights"] else None)            
+        # layout = g.layout_fruchterman_reingold(weights=self.edges_weights if kwargs["weights"] else None)
         # coords = layout.coords
         coords = sfdp_layout_mst(g)
 
@@ -788,7 +938,7 @@ class ChemSpace():
         edges = copy.copy(self.edges)
         edges.extend(self.scaffold_edges)
         g.add_edges(edges)
-        
+
         edges_weights = copy.copy(self.edges_weights)
         edges_weights.extend(self.scaffold_edges_weights)
 
@@ -818,8 +968,10 @@ class ChemSpace():
         coords = sfdp_layout_mst(mst)
 
         for i, indexes in enumerate(mst.get_edgelist()):
-            self.index2edges[indexes[0]][indexes[1]] = round(self.dist_matrix[indexes[0]][indexes[1]], 2)
-        
+            self.index2edges[indexes[0]][indexes[1]] = round(
+                self.dist_matrix[indexes[0]][indexes[1]], 2
+            )
+
         return coords
 
     def _mst_scaffolds(self, data, **kwargs):
@@ -828,7 +980,7 @@ class ChemSpace():
         weights = []
         scaffold_index2order = {si: i for i, si in enumerate(self.scaffold_index_order)}
         identity2value = {0: 0.01}
-        
+
         print("SCAFFOLD EDGES")
         for i, e in enumerate(self.edges):
             weight = 1 - self.edges_weights[i]
@@ -863,10 +1015,21 @@ class ChemSpace():
                     value = round(self.dist_matrix[sid1][sid2], 2)
 
             self.index2edges[ids[0]][ids[1]] = value
-        
+
         return coords
 
-    def arrange(self, by="fps", fps=None, method="pca", similarity_threshold=0.7, add_edges=None, weights=False, knn=None, add_scaffolds_category=False, only_scaffolds=False):
+    def arrange(
+        self,
+        by="fps",
+        fps=None,
+        method="pca",
+        similarity_threshold=0.7,
+        add_edges=None,
+        weights=False,
+        knn=None,
+        add_scaffolds_category=False,
+        only_scaffolds=False,
+    ):
         self.dist_matrix = False
         self.pca50 = None
         self.umap50 = None
@@ -892,20 +1055,24 @@ class ChemSpace():
                 methods = [x.strip() for x in methods[0].split(",")]
 
         self.add_edges = add_edges
-        
+
         if add_edges in [None, False]:
             self.add_edges = any([METHODS[m].get("edges", False) for m in methods])
-        
+
         for method in methods:
-            
-            if "scaffolds" in method in  ["csn_scaffolds", "mst_scaffolds"] and scaffolds_index_order is False:
-                self.scaffold_index_order, self.scaffold_index2order = self._arrange_by_scaffolds()
-                
+            if (
+                "scaffolds" in method in ["csn_scaffolds", "mst_scaffolds"]
+                and scaffolds_index_order is False
+            ):
+                self.scaffold_index_order, self.scaffold_index2order = (
+                    self._arrange_by_scaffolds()
+                )
+
                 try:
                     self._calculate_distance_matrix(
                         index_order=self.scaffold_index_order,
                         index2order=self.scaffold_index2order,
-                        method=method
+                        method=method,
                     )
                 except Exception as e:
                     print(e)
@@ -916,31 +1083,30 @@ class ChemSpace():
                         knn=knn,
                         index_order=self.scaffold_index_order,
                         index2order=self.scaffold_index2order,
-                        method=method
+                        method=method,
                     )
 
                 data = self.data
 
             elif (by == "dm" or METHODS[method]["dm"]) and self.dist_matrix is False:
-
                 if fps is None:
                     fps = []
                     for index in self.index_order:
                         fps.append(self.index2fpobj[index])
-                    
+
                     bitvects = True
-                        
+
                 elif type(fps[0][1]) in [str, int] and not bitvects:
                     self._convert_fps_to_bitvects(fps)
                     bitvects = True
-                    
+
                 self._calculate_distance_matrix()
 
                 if self.add_edges:
                     self._get_edges(
                         similarity_threshold=similarity_threshold,
                         knn=knn,
-                        method=method
+                        method=method,
                     )
 
                 # dist_matrix = np.array([np.array(self.dist_matrix[index]) for index in self.index_order])
@@ -951,10 +1117,10 @@ class ChemSpace():
                 if by == "fps":
                     if fps is None and len(self.index2fpobj):
                         fps = []
-                        
+
                         for index in self.index_order:
                             fps.append(self.index2fpobj[index])
-                    
+
                     data = np.array([np.array([int(b) for b in fp]) for fp in fps])
                 else:
                     data = np.array([np.array(row) for row in self.data])
@@ -962,9 +1128,13 @@ class ChemSpace():
             if method != "none":
                 print(f"Calculating {METHODS[method]['label']}...")
                 feature_names = [f"{METHODS[method]['dim_label']} {i}" for i in [1, 2]]
-                coords = getattr(self, f"_{method}")(data, weights=weights)            
+                coords = getattr(self, f"_{method}")(data, weights=weights)
 
-                if method in ["csn", "csn_weighted", "csn_scaffolds", "mst", "mst_scaffolds"] or self.add_edges:
+                if (
+                    method
+                    in ["csn", "csn_weighted", "csn_scaffolds", "mst", "mst_scaffolds"]
+                    or self.add_edges
+                ):
                     # if self.dist_matrix is False and self.edges in [False, []]:
                     #     self._calculate_distance_matrix(similarity_threshold)
 
@@ -972,27 +1142,40 @@ class ChemSpace():
                     #     if knn is None:
                     #         knn = len(self.index_order)
                     #     self._get_edges(similarity_threshold=similarity_threshold, knn=knn)
-                    
+
                     for cid, es in self.index2edges.items():
-                        
-                        if not self.chemical_space["points"][cid].get(self.KEYS.get("links", "links"), False):
-                            self.chemical_space["points"][cid][self.KEYS.get("links", "links")] = []
+                        if not self.chemical_space["points"][cid].get(
+                            self.KEYS.get("links", "links"), False
+                        ):
+                            self.chemical_space["points"][cid][
+                                self.KEYS.get("links", "links")
+                            ] = []
 
                         for e, weight in es.items():
-                            self.chemical_space["points"][cid][self.KEYS.get("links", "links")].append([e, weight])
-                    
-                index2coords = {index:coords[i] for i, index in enumerate(self.index_order)}
-                
+                            self.chemical_space["points"][cid][
+                                self.KEYS.get("links", "links")
+                            ].append([e, weight])
+
+                index2coords = {
+                    index: coords[i] for i, index in enumerate(self.index_order)
+                }
+
                 for index, values in self.chemical_space["points"].items():
-                    
                     if index in index2coords:
-                        point_features = self.chemical_space["points"][index][self.KEYS.get("features", "features")]
-                        features = [round(index2coords[index][0], 5), round(index2coords[index][1], 5)]
+                        point_features = self.chemical_space["points"][index][
+                            self.KEYS.get("features", "features")
+                        ]
+                        features = [
+                            round(index2coords[index][0], 5),
+                            round(index2coords[index][1], 5),
+                        ]
                         features.extend(point_features)
-                        self.chemical_space["points"][index][self.KEYS.get("features", "features")] = features
+                        self.chemical_space["points"][index][
+                            self.KEYS.get("features", "features")
+                        ] = features
                     else:
                         self.chemical_space["points"].pop(index, None)
-            
+
                 feature_names.extend(self.chemical_space.get("feature_names", []))
                 self.chemical_space["feature_names"] = feature_names
 
@@ -1019,14 +1202,18 @@ class ChemSpace():
         index_order = []
         order = len(self.index_order)
 
-        for index, scaffold in enumerate(self.scaffold2indexes.keys(), self.index_order[-1]+1):
-            self.index2fpobj[index] = FP2FNC[self.fp].GetFingerprint(self.scaffold2rdmol[scaffold])
+        for index, scaffold in enumerate(
+            self.scaffold2indexes.keys(), self.index_order[-1] + 1
+        ):
+            self.index2fpobj[index] = FP2FNC[self.fp].GetFingerprint(
+                self.scaffold2rdmol[scaffold]
+            )
             self.index2scaffold[index] = scaffold
             self.index2rdmol[index] = self.scaffold2rdmol[scaffold]
             self.index_order.append(index)
             index_order.append(index)
             index2order[index] = order
-            order+=1
+            order += 1
 
         self.scaffold_edges = []
         self.scaffold_edges_weights = []
@@ -1042,71 +1229,90 @@ class ChemSpace():
 
     def _add_scaffolds_to_chemical_space(self):
         for index, scaffold in self.index2scaffold.items():
-            label = f"Scaffold {index-len(self.data)+1}"
+            label = f"Scaffold {index - len(self.data) + 1}"
 
             self.chemical_space["points"][index] = {
                 self.KEYS.get("object_ids", "object_ids"): [label],
                 self.KEYS.get("label", "label"): label,
-                self.KEYS.get("features", "features"): []
+                self.KEYS.get("features", "features"): [],
             }
 
             if not self.only_scaffolds:
-                self.chemical_space["points"][index]["links"] =  [[x] for x in self.scaffold2indexes[scaffold]]
+                self.chemical_space["points"][index]["links"] = [
+                    [x] for x in self.scaffold2indexes[scaffold]
+                ]
             else:
-                self.chemical_space["points"][index][self.KEYS.get("object_ids", "object_ids")].extend(
-                    [str(self.index2id[i]) for i in self.scaffold2index_orders[scaffold]]
+                self.chemical_space["points"][index][
+                    self.KEYS.get("object_ids", "object_ids")
+                ].extend(
+                    [
+                        str(self.index2id[i])
+                        for i in self.scaffold2index_orders[scaffold]
+                    ]
                 )
 
             for i, f in enumerate(self.chemical_space.get("feature_names", [])):
-                values = [self.chemical_space["points"][x][self.KEYS.get("features", "features")][i] for x in self.scaffold2indexes[scaffold]]
+                values = [
+                    self.chemical_space["points"][x][
+                        self.KEYS.get("features", "features")
+                    ][i]
+                    for x in self.scaffold2indexes[scaffold]
+                ]
                 values = [v for v in values if v is not None]
                 value = round(np.mean(values), 2) if len(values) else None
-                self.chemical_space["points"][index][self.KEYS.get("features", "features")].append(value)
+                self.chemical_space["points"][index][
+                    self.KEYS.get("features", "features")
+                ].append(value)
 
             self.chemical_space["compounds"][label] = {
                 self.KEYS.get("smiles", "smiles"): scaffold,
                 # "color": "red"
             }
-            
+
             if self.only_scaffolds:
                 for i in self.scaffold2index_orders[scaffold]:
                     self.chemical_space["points"].pop(i, None)
-        
+
         if self.only_scaffolds and self.category_field:
             pass
-        
+
         elif self.add_scaffolds_category:
             if not self.chemical_space.get("categories", False):
                 self.chemical_space["categories"] = []
 
-            self.chemical_space["categories"].append({
-                self.KEYS.get("label", "label"): "scaffolds", 
-                "color": "gray", 
-                "points": list(self.index2scaffold.keys()), 
-                "shape": "circle"
-            })
+            self.chemical_space["categories"].append(
+                {
+                    self.KEYS.get("label", "label"): "scaffolds",
+                    "color": "gray",
+                    "points": list(self.index2scaffold.keys()),
+                    "shape": "circle",
+                }
+            )
 
-
-    def export_chemical_space_as_html(self, htmldir=".", ):
+    def export_chemical_space_as_html(
+        self,
+        htmldir=".",
+    ):
         """Export a simple HTML page with embedded chemical space and dependencies into a given directory."""
         if not os.path.exists(htmldir):
             os.makedirs(htmldir)
 
         chemspace_json = self.export_chemical_space_as_json(minify=True, dump=True)
-        
+
         libs = [
-            ("chemspace-0.2.0.min.js", "https://openscreen.cz/software/chemspace/static/js/chemspace-0.2.0.min.js"),
+            (
+                "chemspace-0.2.0.min.js",
+                "https://openscreen.cz/software/chemspace/static/js/chemspace-0.2.0.min.js",
+            ),
             ("jquery-3.3.1.min.js", "https://code.jquery.com/jquery-3.3.1.min.js"),
-            ("konva.min.js", "https://cdn.rawgit.com/konvajs/konva/1.7.6/konva.min.js")
+            ("konva.min.js", "https://cdn.rawgit.com/konvajs/konva/1.7.6/konva.min.js"),
         ]
-        
+
         js_html = []
         for l in libs:
             js_html.append("<script src='{}'></script>".format(l[0]))
 
-        settings = {
-            "target": "chemspace"
-        }
+        settings = {"target": "chemspace"}
 
         template = """<html>
         <head>
@@ -1124,9 +1330,8 @@ class ChemSpace():
         <body>
             <div id="chemspace"></div>
         </body>
-        </html>""".format('\n'.join(js_html), chemspace_json, json.dumps(settings))
+        </html>""".format("\n".join(js_html), chemspace_json, json.dumps(settings))
 
-        
         for l in libs:
             lib, url = l
             try:
@@ -1136,9 +1341,12 @@ class ChemSpace():
                 with open(os.path.join(htmldir, lib), "w") as output:
                     output.write(source_html)
             except requests.exceptions.RequestException as e:
-                raise Exception("""
-                        \nCan't download file {}.\nPlease check your internet connection and try again.\nIf the error persists there can be something wrong with the InCHlib server.\n""".format(url)
+                raise Exception(
+                    """
+                        \nCan't download file {}.\nPlease check your internet connection and try again.\nIf the error persists there can be something wrong with the InCHlib server.\n""".format(
+                        url
                     )
+                )
 
         with open(os.path.join(htmldir, "chemspace.html"), "w") as output:
             output.write(template)
@@ -1151,37 +1359,44 @@ class ChemSpace():
             space_json = json.dumps(space_json, ignore_nan=True)
             space_json = self._minify_data(space_json)
         elif dump:
-            space_json = json.dumps(space_json, indent=4,  ignore_nan=True)
+            space_json = json.dumps(space_json, indent=4, ignore_nan=True)
 
         if filename:
             output = open(filename, "w")
             output.write(space_json)
-        
+
         return space_json
 
     def _minify_data(self, data):
         return jsmin.jsmin(data)
 
+
 def _process_(arguments):
     s = ChemSpace(
-        write_structures = False if arguments.dont_write_structures else True,
-        fp = arguments.fingerprint,
-        category_field = arguments.category_field,
-        category_field_delimiter = arguments.category_field_delimiter,
-        label_field = arguments.label_field,
-        compound_structure_field = arguments.compound_structure_field,
-        keep_unparsable_structures = arguments.keep_unparsable_structures,
-        fingerprint_field = arguments.fingerprint_field,
-        metric = arguments.similarity_metric,
+        write_structures=False if arguments.dont_write_structures else True,
+        fp=arguments.fingerprint,
+        category_field=arguments.category_field,
+        category_field_delimiter=arguments.category_field_delimiter,
+        label_field=arguments.label_field,
+        compound_structure_field=arguments.compound_structure_field,
+        keep_unparsable_structures=arguments.keep_unparsable_structures,
+        fingerprint_field=arguments.fingerprint_field,
+        metric=arguments.similarity_metric,
         compressed_data_format=arguments.compressed_data_format,
         round_values=arguments.round_values,
-        n_jobs=arguments.n_jobs
+        n_jobs=arguments.n_jobs,
     )
 
     if arguments.data_file.split(".")[-1].lower() == "sdf":
         s.read_sdf(arguments.data_file)
     else:
-        s.read_csv(arguments.data_file, arguments.data_delimiter, arguments.data_header, arguments.missing_values, arguments.remove_columns)
+        s.read_csv(
+            arguments.data_file,
+            arguments.data_delimiter,
+            arguments.data_header,
+            arguments.missing_values,
+            arguments.remove_columns,
+        )
 
     if s.compound_structure_field is not False or s.sdf == True:
         if arguments.physico_chemical_properties:
@@ -1198,52 +1413,228 @@ def _process_(arguments):
             by=arguments.arrange_by,
             knn=arguments.knn,
             add_scaffolds_category=arguments.add_scaffolds_category,
-            only_scaffolds=arguments.only_scaffolds
+            only_scaffolds=arguments.only_scaffolds,
         )
-    
+
     if arguments.html_dir:
         s.export_chemical_space_as_html(arguments.html_dir)
     elif arguments.output_file:
-        s.export_chemical_space_as_json(arguments.output_file, minify=arguments.minify_output)
+        s.export_chemical_space_as_json(
+            arguments.output_file, minify=arguments.minify_output
+        )
     else:
         print(s.export_chemical_space_as_json(minify=arguments.minify_output))
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument("data_file", type=str, help="csv(text) data file with delimited values or a sdf file")
-    parser.add_argument("-dh", "--data_header", default=False, help="whether the first row of data file is a header", action="store_true")
-    parser.add_argument("-dd", "--data_delimiter", type=str, default=",", help="delimiter of values in data file")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    parser.add_argument(
+        "data_file",
+        type=str,
+        help="csv(text) data file with delimited values or a sdf file",
+    )
+    parser.add_argument(
+        "-dh",
+        "--data_header",
+        default=False,
+        help="whether the first row of data file is a header",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-dd",
+        "--data_delimiter",
+        type=str,
+        default=",",
+        help="delimiter of values in data file",
+    )
     parser.add_argument("-o", "--output_file", type=str, help="the name of output file")
-    parser.add_argument("-fpf", "--fingerprint_field", type=str, default=False, help="set a fingerprint field name in case it is in the data file")
-    parser.add_argument("-cf", "--category_field", type=str, default=False, help="set a category field name in case it is in the data file")
-    parser.add_argument("-cfd", "--category_field_delimiter", type=str, default=False, help="a category field delimiter")
-    parser.add_argument("-lf", "--label_field", type=str, default=False, help="set a label field name in case it is in the data file")
-    parser.add_argument("-af", "--activity_field", type=str, default=False, help="set an activity field name in case it is in the data file")
-    parser.add_argument("-csf", "--compound_structure_field", type=str, default=False, help="the name of a column with a compound structure")
-    parser.add_argument("-kus", "--keep_unparsable_structures", default=False, help="keep data even if the compound structure is not parsed", action="store_true")
-    parser.add_argument("-fp", "--fingerprint", type=str, default="ecfp4", help="fingerprint used for a compound representation (ecfp4, ecfp6, maccs, topological, atom_pairs)")
+    parser.add_argument(
+        "-fpf",
+        "--fingerprint_field",
+        type=str,
+        default=False,
+        help="set a fingerprint field name in case it is in the data file",
+    )
+    parser.add_argument(
+        "-cf",
+        "--category_field",
+        type=str,
+        default=False,
+        help="set a category field name in case it is in the data file",
+    )
+    parser.add_argument(
+        "-cfd",
+        "--category_field_delimiter",
+        type=str,
+        default=False,
+        help="a category field delimiter",
+    )
+    parser.add_argument(
+        "-lf",
+        "--label_field",
+        type=str,
+        default=False,
+        help="set a label field name in case it is in the data file",
+    )
+    parser.add_argument(
+        "-af",
+        "--activity_field",
+        type=str,
+        default=False,
+        help="set an activity field name in case it is in the data file",
+    )
+    parser.add_argument(
+        "-csf",
+        "--compound_structure_field",
+        type=str,
+        default=False,
+        help="the name of a column with a compound structure",
+    )
+    parser.add_argument(
+        "-kus",
+        "--keep_unparsable_structures",
+        default=False,
+        help="keep data even if the compound structure is not parsed",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-fp",
+        "--fingerprint",
+        type=str,
+        default="ecfp4",
+        help="fingerprint used for a compound representation (ecfp4, ecfp6, maccs, topological, atom_pairs)",
+    )
     # parser.add_argument("-c", "--compounds", type=str, default=None, help="csv(text) compound file with delimited values in a form: id,smiles")
     # parser.add_argument("-cd", "--compounds_delimiter", type=str, default=",", help="delimiter of values in compound file")
-    parser.add_argument("-arr", "--arrange_by", default="data", help="arrange data by compound structures (distance matrix) or by input data (data/fps)", type=str)
-    parser.add_argument("-asc", "--add_scaffolds_category", default=False, help="add scaffolds as a category (only for arrange by csn_scaffolds)", type=str)
-    parser.add_argument("-osc", "--only_scaffolds", default=False, help="add only scaffolds to chemical space, point IDs added as object IDs", action="store_true")
-    parser.add_argument("-cst", "--compound_similarity_threshold", default=0.7, help="compound similarity threshold")
-    parser.add_argument("-drm", "--dimensional_reduction_method", nargs='+', type=str, default="pca", help="which method use for dimensional reduction (pca/isomap/csn)")
-    parser.add_argument("-dws", "--dont_write_structures", default=False, help="dont write structures to output file", action="store_true")
-    parser.add_argument("-min", "--minify_output", default=False, help="minify the JSON output format", action="store_true")
-    parser.add_argument("-html", "--html_dir", type=str, default=False, help="the directory to store HTML page with dependencies")
-    parser.add_argument("-pcp", "--physico_chemical_properties", default=False, help="calculate basic phyisico-chemical properties and add them ass features", action='store_true')
-    parser.add_argument("-edges", "--add_edges", default=False, help="add edges based on compound similarity to the graph", action='store_true')
-    parser.add_argument("-n", "--normalize", default=False, help="normalize data to [0, 1] range", action="store_true")
-    parser.add_argument("-mv", "--missing_values", type=str, default=False, help="define the string representating missing values in the data")
-    parser.add_argument("-knn", "--knn", type=int, default=None, help="the number of neighbours (k) used for the construction of csn using the nn method")
-    parser.add_argument("-sm", "--similarity_metric", type=str, default="jaccard", help="similarity metric")
-    parser.add_argument('-rmc','--remove_columns', nargs='+', default=False, help='columns in data that should not be used')
-    parser.add_argument('-cdf','--compressed_data_format', default=False, help='use shorter data keys', action='store_true')
-    parser.add_argument("-rv", "--round_values", type=int, default=False, help="the number of decimal places used for rounding")
-    parser.add_argument("-njobs", "--n_jobs", type=int, default=1, help="the number of CPUs/threads to use for distance matrix calculation")
+    parser.add_argument(
+        "-arr",
+        "--arrange_by",
+        default="data",
+        help="arrange data by compound structures (distance matrix) or by input data (data/fps)",
+        type=str,
+    )
+    parser.add_argument(
+        "-asc",
+        "--add_scaffolds_category",
+        default=False,
+        help="add scaffolds as a category (only for arrange by csn_scaffolds)",
+        type=str,
+    )
+    parser.add_argument(
+        "-osc",
+        "--only_scaffolds",
+        default=False,
+        help="add only scaffolds to chemical space, point IDs added as object IDs",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-cst",
+        "--compound_similarity_threshold",
+        default=0.7,
+        help="compound similarity threshold",
+    )
+    parser.add_argument(
+        "-drm",
+        "--dimensional_reduction_method",
+        nargs="+",
+        type=str,
+        default="pca",
+        help="which method use for dimensional reduction (pca/isomap/csn)",
+    )
+    parser.add_argument(
+        "-dws",
+        "--dont_write_structures",
+        default=False,
+        help="dont write structures to output file",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-min",
+        "--minify_output",
+        default=False,
+        help="minify the JSON output format",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-html",
+        "--html_dir",
+        type=str,
+        default=False,
+        help="the directory to store HTML page with dependencies",
+    )
+    parser.add_argument(
+        "-pcp",
+        "--physico_chemical_properties",
+        default=False,
+        help="calculate basic phyisico-chemical properties and add them ass features",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-edges",
+        "--add_edges",
+        default=False,
+        help="add edges based on compound similarity to the graph",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-n",
+        "--normalize",
+        default=False,
+        help="normalize data to [0, 1] range",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-mv",
+        "--missing_values",
+        type=str,
+        default=False,
+        help="define the string representating missing values in the data",
+    )
+    parser.add_argument(
+        "-knn",
+        "--knn",
+        type=int,
+        default=None,
+        help="the number of neighbours (k) used for the construction of csn using the nn method",
+    )
+    parser.add_argument(
+        "-sm",
+        "--similarity_metric",
+        type=str,
+        default="jaccard",
+        help="similarity metric",
+    )
+    parser.add_argument(
+        "-rmc",
+        "--remove_columns",
+        nargs="+",
+        default=False,
+        help="columns in data that should not be used",
+    )
+    parser.add_argument(
+        "-cdf",
+        "--compressed_data_format",
+        default=False,
+        help="use shorter data keys",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-rv",
+        "--round_values",
+        type=int,
+        default=False,
+        help="the number of decimal places used for rounding",
+    )
+    parser.add_argument(
+        "-njobs",
+        "--n_jobs",
+        type=int,
+        default=1,
+        help="the number of CPUs/threads to use for distance matrix calculation",
+    )
 
-    
     args = parser.parse_args()
     _process_(args)
