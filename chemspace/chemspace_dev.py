@@ -421,7 +421,7 @@ class ChemSpace:
     def read_data(self, rows, header=False, missing_values=False, remove_columns=False):
         """Reads data in a form of list of lists (tuples)"""
         self.header = header
-        self.missing_values = missing_values
+        self.missing_values = missing_values if missing_values is not False else []
         data_start = 0
 
         self.data = rows
