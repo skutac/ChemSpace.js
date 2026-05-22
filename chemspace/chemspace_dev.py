@@ -223,7 +223,6 @@ def sfdp_layout_mst(igraph_graph):
         print("Calculating sfdp (MST) layout...")
 
         A = pgv.AGraph(tmpfile.name)
-
         A.graph_attr.update(
             {
                 "splines": "true",
