@@ -39,6 +39,7 @@ from rdkit.Chem import (
     QED,
     AllChem,
     Crippen,
+    Descriptors,
     Draw,
     Lipinski,
     Scaffolds,
@@ -65,7 +66,7 @@ PROPS_ORDER = [
 ]
 
 PROP2FNC = {
-    "mw": rdMolDescriptors.CalcExactMolWt,
+    "mw": Descriptors.MolWt,
     "hba": Lipinski.NumHAcceptors,
     "hbd": Lipinski.NumHDonors,
     "rb": Lipinski.NumRotatableBonds,
@@ -654,12 +655,24 @@ class ChemSpace:
                 else:
                     category2ids[c] = {self.index2id[index]}
 
-        if not "categories" in self.chemical_space:
+        if "categories" not in self.chemical_space:
             self.chemical_space["categories"] = []
 
         for c, ids in category2ids.items():
             self.chemical_space["categories"].append(
                 {self.KEYS.get("label", "label"): c, "objects": list(ids)}
+            )
+
+        uncategorized = {
+            i for index, i in self.index2id.items() if index not in self.index2category
+        }
+
+        if uncategorized:
+            self.chemical_space["categories"].append(
+                {
+                    self.KEYS.get("label", "label"): "other",
+                    "objects": list(uncategorized),
+                }
             )
 
     def add_paths(self, paths):
