@@ -30,9 +30,9 @@ except Exception as e:
     print(e)
 
 import tempfile
-
 import igraph
 import jsmin
+from flodr import FloDR
 import rdkit
 from rdkit import Chem, DataStructs, Geometry
 from rdkit.Chem import (
@@ -128,6 +128,7 @@ METHODS = {
         "dim_label": "MDS",
     },
     "umap": {"dm": False, "edges": False, "label": "UMAP", "dim_label": "UMAP"},
+    "flodr": {"dm": False, "edges": False, "label": "FloDR", "dim_label": "FloDR"},
     "tsne": {"dm": False, "edges": False, "label": "t-SNE", "dim_label": "t-SNE"},
     "multicore_tsne": {
         "dm": False,
@@ -931,6 +932,18 @@ class ChemSpace:
         coords = [
             [float(x[0]), float(x[1])] if not np.isnan(x[0]) else [0, 0] for x in coords
         ]
+        print("UMAP calculated...")
+        return coords
+
+    def _flodr(self, data, **kwargs):
+        data = self.pca50 if self.pca50 is not None else self._pca50(data)
+
+        # umap = UMAP(n_neighbors=20, min_dist=1, metric="jaccard")
+        flodr = FloDR(w=2.0, random_state=0, density=True, device="cpu").fit(data)
+        coords = [
+            [float(x[0]), float(x[1])] if not np.isnan(x[0]) else [0, 0] for x in flodr.embedding_
+        ]
+        print("FloDR calculated...")
         return coords
 
     def _csn(self, data, **kwargs):
@@ -1171,7 +1184,7 @@ class ChemSpace:
                 index2coords = {
                     index: coords[i] for i, index in enumerate(self.index_order)
                 }
-
+                print("Before")
                 for index, values in self.chemical_space["points"].items():
                     if index in index2coords:
                         point_features = self.chemical_space["points"][index][
@@ -1187,7 +1200,7 @@ class ChemSpace:
                         ] = features
                     else:
                         self.chemical_space["points"].pop(index, None)
-
+                print("After")
                 feature_names.extend(self.chemical_space.get("feature_names", []))
                 self.chemical_space["feature_names"] = feature_names
 
