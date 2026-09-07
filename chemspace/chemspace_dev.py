@@ -12,6 +12,7 @@ import requests
 import simplejson as json
 from scipy.spatial import distance
 from sklearn import decomposition, manifold, metrics, preprocessing
+from sklearn.utils import check_random_state
 from sklearn.impute import SimpleImputer
 
 try:
@@ -21,6 +22,7 @@ except Exception as e:
 
 try:
     from umap import UMAP
+    from umap.umap_ import nearest_neighbors
 except Exception as e:
     print(e)
 
@@ -29,10 +31,14 @@ try:
 except Exception as e:
     print(e)
 
+try:
+    from flodr import FloDR
+except Exception as e:
+    print(e)
+
 import tempfile
 import igraph
 import jsmin
-from flodr import FloDR
 import rdkit
 from rdkit import Chem, DataStructs, Geometry
 from rdkit.Chem import (
@@ -160,11 +166,23 @@ METHODS = {
         "label": "Minimum Spanning Tree",
         "dim_label": "MST",
     },
+    "mst_knn": {
+        "dm": False,
+        "edges": True,
+        "label": "Approximate MST (kNN graph)",
+        "dim_label": "MST-kNN",
+    },
     "mst_scaffolds": {
         "dm": True,
         "edges": True,
         "label": "Minimum Scaffold Spanning Tree",
         "dim_label": "Scaffold MST",
+    },
+    "mst_scaffolds_knn": {
+        "dm": False,
+        "edges": True,
+        "label": "Approximate Scaffold MST (kNN graph)",
+        "dim_label": "Scaffold MST-kNN",
     },
 }
 
@@ -202,6 +220,20 @@ def _pcp_worker(item):
     except Exception:
         pcps = [None for _ in props_order]
     return index, pcps
+
+
+def _scaffold_worker(item):
+    """Worker function to compute the Murcko scaffold SMILES for one molecule."""
+    index, rdmol = item
+
+    try:
+        scaffold = Scaffolds.MurckoScaffold.GetScaffoldForMol(rdmol)
+        scaffold_smiles = Chem.MolToSmiles(scaffold, isomericSmiles=False)
+    except Exception as e:
+        print(e)
+        scaffold_smiles = ""
+
+    return index, scaffold_smiles
 
 
 def sfdp_layout_mst(igraph_graph):
@@ -939,7 +971,7 @@ class ChemSpace:
         data = self.pca50 if self.pca50 is not None else self._pca50(data)
 
         # umap = UMAP(n_neighbors=20, min_dist=1, metric="jaccard")
-        flodr = FloDR(w=2.0, random_state=0, density=True, device="cpu").fit(data)
+        flodr = FloDR(w=2.0, random_state=0, density=False, device="cpu").fit(data)
         coords = [
             [float(x[0]), float(x[1])] if not np.isnan(x[0]) else [0, 0] for x in flodr.embedding_
         ]
@@ -999,6 +1031,163 @@ class ChemSpace:
 
         return coords
 
+    def _mst_knn(self, data, **kwargs):
+        """Approximate minimum spanning tree built on an approximate k-NN graph.
+
+        Instead of the full N x N distance matrix (O(N^2) memory) used by
+        :meth:`_mst`, the neighbourhood graph is computed with NN-Descent
+        (the same approximate nearest-neighbour search UMAP uses internally)
+        on sparse fingerprints using the Jaccard (Tanimoto) metric - O(N*k)
+        memory and roughly O(N^1.2) time, which makes the method applicable
+        to large compound sets (~100k compounds).
+
+        The spanning tree is computed on the k-NN graph and disconnected
+        components are bridged by a second-level MST computed between
+        component representatives (their highest-degree vertices, using
+        exact pairwise Tanimoto similarities), so the result is always a
+        single tree. The 2D layout of the tree is computed with Graphviz
+        sfdp, the same way as in :meth:`_mst`.
+
+        Note: the k-NN graph does not necessarily contain all edges of the
+        exact MST, hence the resulting tree is an *approximation* of the
+        full-distance-matrix MST.
+        """
+        from scipy import sparse
+        KNN = 25  # neighbours per compound in the approximate k-NN graph
+
+        n = len(self.index_order)
+        k = max(2, min(KNN, n))
+
+        if self.metric.lower() not in ["jaccard", "tanimoto"]:
+            print(
+                "WARNING: mst_knn supports only the Tanimoto (Jaccard) metric,"
+                f" '{self.metric}' requested - using Jaccard."
+            )
+
+        if len(self.index2fpobj) == n:
+            # build a sparse binary fingerprint matrix directly from the bit
+            # vectors (avoids materializing the dense N x n_bits matrix)
+            indptr = [0]
+            indices = []
+            n_bits = 0
+
+            for index in self.index_order:
+                fp = self.index2fpobj[index]
+                indices.extend(fp.GetOnBits())
+                indptr.append(len(indices))
+                n_bits = max(n_bits, fp.GetNumBits())
+
+            fps_sparse = sparse.csr_matrix(
+                (
+                    np.ones(len(indices), dtype=np.float32),
+                    np.asarray(indices, dtype=np.int32),
+                    np.asarray(indptr, dtype=np.int64),
+                ),
+                shape=(n, n_bits),
+            )
+        else:
+            fps_sparse = sparse.csr_matrix(np.asarray(data, dtype=np.float32))
+
+        print(
+            f"\nCalculating approximate kNN graph [NN-Descent, metric=jaccard, k={k}]: {n} compounds"
+        )
+        start = time.time()
+        knn_indices, knn_dists, _knn_search_index = nearest_neighbors(
+            fps_sparse,
+            k,
+            "jaccard",
+            {},
+            False,
+            check_random_state(None),
+            n_jobs=self.n_jobs,
+        )
+        print("kNN graph calculated:", round(time.time() - start, 2))
+
+        # undirected union of the (directed) kNN edges, keeping the
+        # smaller distance (higher similarity) per compound pair
+        kn = knn_indices.shape[1]
+        rows = np.repeat(np.arange(n), kn)
+        cols = knn_indices.ravel()
+        dists = knn_dists.ravel().astype(np.float64)
+
+        valid = (rows != cols) & (cols >= 0) & ~np.isnan(dists) & (dists < 1.0)
+        rows, cols, dists = rows[valid], cols[valid], dists[valid]
+
+        edge_lo = np.minimum(rows, cols)
+        edge_hi = np.maximum(rows, cols)
+        key = edge_lo * n + edge_hi
+        order = np.argsort(dists, kind="stable")
+        unique_keys, first = np.unique(key[order], return_index=True)
+        sel = order[first]
+        edge_lo, edge_hi = edge_lo[sel], edge_hi[sel]
+        edge_sims = 1.0 - dists[sel]
+
+        print(f"kNN graph: {len(edge_sims)} unique edges")
+
+        start = time.time()
+        g = igraph.Graph(n)
+        g.add_edges(np.column_stack([edge_lo, edge_hi]).tolist())
+        g.es["weight"] = (1.0 - edge_sims).tolist()
+        mst = g.spanning_tree(weights=g.es["weight"], return_tree=True)
+        print("MST calculated:", round(time.time() - start, 2))
+
+        membership = np.asarray(g.components().membership)
+        n_components = int(membership.max()) + 1
+
+        key2sim = dict(zip(unique_keys.tolist(), edge_sims.tolist()))
+        tree_edges = [tuple(map(int, e)) for e in mst.get_edgelist()]
+        tree_sims = [key2sim[min(u, v) * n + max(u, v)] for u, v in tree_edges]
+
+        # bridge disconnected components by a second-level MST between
+        # component representatives so that the result is a single tree
+        if n_components > 1:
+            print(f"Bridging {n_components} kNN graph components...")
+            start = time.time()
+
+            # representative of a component = its highest-degree compound
+            by_degree = np.argsort(-np.asarray(g.degree()), kind="stable")
+            reps = by_degree[np.unique(membership[by_degree], return_index=True)[1]]
+
+            # exact pairwise Tanimoto similarities between the representatives
+            rep_fps = fps_sparse[reps].copy()
+            rep_fps.data[:] = 1.0
+            rep_sizes = np.asarray(rep_fps.sum(axis=1)).ravel()
+
+            sim_blocks = []
+            block = 2000
+
+            for i0 in range(0, n_components, block):
+                inter = (rep_fps[i0 : i0 + block] @ rep_fps.T).toarray()
+                union = rep_sizes[i0 : i0 + block, None] + rep_sizes[None, :] - inter
+                sim_blocks.append(
+                    np.divide(inter, union, out=np.zeros_like(inter), where=union > 0)
+                )
+
+            rep_sim = np.vstack(sim_blocks)
+
+            cu, cv = np.triu_indices(n_components, k=1)
+            cg = igraph.Graph(n_components)
+            cg.add_edges(np.column_stack([cu, cv]).tolist())
+            cg.es["weight"] = (1.0 - rep_sim[cu, cv]).tolist()
+            cmst = cg.spanning_tree(weights=cg.es["weight"], return_tree=True)
+
+            for u, v in cmst.get_edgelist():
+                tree_edges.append((int(reps[u]), int(reps[v])))
+                tree_sims.append(float(rep_sim[u, v]))
+
+            print("Components bridged:", round(time.time() - start, 2))
+
+        for (u, v), s in zip(tree_edges, tree_sims):
+            self.index2edges[u][v] = round(float(s), 2)
+
+        # 2D layout: sfdp layout of the final (bridged) tree, the same
+        # way as in the original _mst implementation
+        tree = igraph.Graph(n)
+        tree.add_edges(tree_edges)
+        tree.es["weight"] = [round(1.0 - float(s), 5) for s in tree_sims]
+
+        return sfdp_layout_mst(tree)
+
     def _mst_scaffolds(self, data, **kwargs):
         # edges = []
         only_edges = []
@@ -1043,6 +1232,223 @@ class ChemSpace:
 
         return coords
 
+    def _mst_scaffolds_knn(self, data, **kwargs):
+        """Approximate minimum spanning tree over Murcko scaffolds, built on
+        an approximate k-NN graph.
+
+        Same tree semantics as :meth:`_mst_scaffolds` (a scaffold-scaffold
+        backbone with compounds attached as leaves of their scaffold), but
+        instead of the full S x S scaffold distance matrix the
+        neighbourhood graph between scaffolds is computed with NN-Descent
+        (the same approximate nearest-neighbour search UMAP uses
+        internally) on sparse scaffold fingerprints using the Jaccard
+        (Tanimoto) metric - making the method applicable to large compound
+        sets (~100k compounds).
+
+        Disconnected components of the scaffold k-NN graph are bridged by a
+        second-level MST computed between component representatives (their
+        highest-degree scaffolds, using exact pairwise Tanimoto
+        similarities), so the result is always a single tree. The 2D layout
+        of the tree is computed with Graphviz sfdp, the same way as in
+        :meth:`_mst_scaffolds`.
+
+        Note: the k-NN graph does not necessarily contain all edges of the
+        exact scaffold MST, hence the resulting tree is an *approximation*.
+        """
+        from scipy import sparse
+
+        KNN = 25  # neighbours per scaffold in the approximate k-NN graph
+
+        scaffold_order = list(self.scaffold_index_order)
+        n_scaffolds = len(scaffold_order)
+        n_all = len(self.index_order)  # compounds + scaffold pseudo-nodes
+        identity2value = {0: 0.01}  # same convention as _mst_scaffolds
+
+        # graph vertices = positions in the extended index_order
+        pos_of_row = np.asarray(
+            [self.scaffold_index2order[si] for si in scaffold_order]
+        )
+        scaffold_vertices = {int(v) for v in pos_of_row}
+        row_of_pos = {int(pos_of_row[j]): j for j in range(n_scaffolds)}
+
+        # sparse binary fingerprint matrix of the scaffolds
+        indptr = [0]
+        indices = []
+        n_bits = 0
+
+        for si in scaffold_order:
+            fp = self.index2fpobj[si]
+            indices.extend(fp.GetOnBits())
+            indptr.append(len(indices))
+            n_bits = max(n_bits, fp.GetNumBits())
+
+        fps_sparse = sparse.csr_matrix(
+            (
+                np.ones(len(indices), dtype=np.float32),
+                np.asarray(indices, dtype=np.int32),
+                np.asarray(indptr, dtype=np.int64),
+            ),
+            shape=(n_scaffolds, n_bits),
+        )
+
+        edge_lo, edge_hi, edge_sims = [], [], []
+
+        if n_scaffolds >= 3:
+            k = max(2, min(KNN, n_scaffolds))
+            print(
+                f"\nCalculating approximate scaffold kNN graph [NN-Descent, metric=jaccard, k={k}]: {n_scaffolds} scaffolds"
+            )
+            start = time.time()
+            knn_indices, knn_dists, _knn_search_index = nearest_neighbors(
+                fps_sparse,
+                k,
+                "jaccard",
+                {},
+                False,
+                check_random_state(None),
+                n_jobs=self.n_jobs,
+            )
+            print("scaffold kNN graph calculated:", round(time.time() - start, 2))
+
+            # undirected union of the (directed) kNN edges, keeping the
+            # smaller distance (higher similarity) per scaffold pair
+            kn = knn_indices.shape[1]
+            rows = np.repeat(np.arange(n_scaffolds), kn)
+            cols = knn_indices.ravel()
+            dists = knn_dists.ravel().astype(np.float64)
+
+            valid = (rows != cols) & (cols >= 0) & ~np.isnan(dists) & (dists < 1.0)
+            rows, cols, dists = rows[valid], cols[valid], dists[valid]
+
+            lo = np.minimum(rows, cols)
+            hi = np.maximum(rows, cols)
+            key = lo * n_scaffolds + hi
+            order = np.argsort(dists, kind="stable")
+            unique_keys, first = np.unique(key[order], return_index=True)
+            sel = order[first]
+
+            # map scaffold rows to graph vertex ids
+            edge_lo = [int(v) for v in pos_of_row[lo[sel]]]
+            edge_hi = [int(v) for v in pos_of_row[hi[sel]]]
+            edge_sims = [float(s) for s in 1.0 - dists[sel]]
+
+        elif n_scaffolds == 2:
+            inter = (fps_sparse[0] @ fps_sparse[1].T).sum()
+            union = fps_sparse[0].sum() + fps_sparse[1].sum() - inter
+            sim = float(inter / union) if union > 0 else 0.0
+
+            if sim > 0:
+                edge_lo = [int(pos_of_row[0])]
+                edge_hi = [int(pos_of_row[1])]
+                edge_sims = [sim]
+
+        print(f"scaffold kNN graph: {len(edge_sims)} unique edges")
+
+        key2sim = {
+            min(u, v) * n_all + max(u, v): s
+            for u, v, s in zip(edge_lo, edge_hi, edge_sims)
+        }
+
+        # MST graph: scaffold-scaffold kNN edges (weight 1 - sim, identical
+        # scaffolds remapped to 0.01) + compound attachment edges (weight 1)
+        only_edges = list(zip(edge_lo, edge_hi))
+        weights = [identity2value.get(1.0 - s, 1.0 - s) for s in edge_sims]
+
+        if not self.only_scaffolds:
+            print("Adding scaffold compound edges...")
+            for u, v in self.scaffold_edges:
+                only_edges.append((int(u), int(v)))
+                weights.append(1)
+
+        start = time.time()
+        g = igraph.Graph(n_all)
+        if only_edges:
+            g.add_edges(only_edges)
+            g.es["weight"] = weights
+        mst = g.spanning_tree(weights=g.es["weight"], return_tree=True)
+        print("MST calculated:", round(time.time() - start, 2))
+
+        membership = np.asarray(g.components().membership)
+        n_components = int(membership.max()) + 1
+
+        tree_edges = [tuple(map(int, e)) for e in mst.get_edgelist()]
+        tree_sims = [
+            key2sim[min(u, v) * n_all + max(u, v)]
+            if (u in scaffold_vertices and v in scaffold_vertices)
+            else None
+            for u, v in tree_edges
+        ]
+
+        # bridge disconnected scaffold components by a second-level MST
+        # between component representatives so that the result is a single
+        # tree (compound-only components occur only with only_scaffolds=True
+        # and do not need bridging)
+        if n_components > 1:
+            print(f"Bridging scaffold kNN graph components...")
+            start = time.time()
+
+            degrees = np.asarray(g.degree())
+            by_degree = np.argsort(-degrees, kind="stable")
+
+            comp2rep = {}
+            for v in by_degree:
+                v = int(v)
+                c = membership[v]
+                if c not in comp2rep and v in scaffold_vertices:
+                    comp2rep[c] = v
+
+            rep_vertices = list(comp2rep.values())
+
+            if len(rep_vertices) > 1:
+                # exact pairwise Tanimoto similarities between representatives
+                rep_rows = [row_of_pos[v] for v in rep_vertices]
+                rep_fps = fps_sparse[rep_rows].copy()
+                rep_fps.data[:] = 1.0
+                rep_sizes = np.asarray(rep_fps.sum(axis=1)).ravel()
+
+                sim_blocks = []
+                block = 2000
+
+                for i0 in range(0, len(rep_vertices), block):
+                    inter = (rep_fps[i0 : i0 + block] @ rep_fps.T).toarray()
+                    union = rep_sizes[i0 : i0 + block, None] + rep_sizes[None, :] - inter
+                    sim_blocks.append(
+                        np.divide(
+                            inter, union, out=np.zeros_like(inter), where=union > 0
+                        )
+                    )
+
+                rep_sim = np.vstack(sim_blocks)
+
+                cu, cv = np.triu_indices(len(rep_vertices), k=1)
+                cg = igraph.Graph(len(rep_vertices))
+                cg.add_edges(np.column_stack([cu, cv]).tolist())
+                cg.es["weight"] = (1.0 - rep_sim[cu, cv]).tolist()
+                cmst = cg.spanning_tree(weights=cg.es["weight"], return_tree=True)
+
+                for u, v in cmst.get_edgelist():
+                    tree_edges.append((rep_vertices[u], rep_vertices[v]))
+                    tree_sims.append(float(rep_sim[u, v]))
+
+                print("Components bridged:", round(time.time() - start, 2))
+
+        # links: scaffold-scaffold tree edges carry the Tanimoto similarity,
+        # scaffold-compound attachment edges carry None (as in _mst_scaffolds)
+        print("Creating index2edges...")
+        for (u, v), s in zip(tree_edges, tree_sims):
+            self.index2edges[u][v] = round(float(s), 2) if s is not None else None
+
+        # 2D layout: sfdp on the final (bridged) tree, same as _mst_scaffolds
+        tree = igraph.Graph(n_all)
+        if tree_edges:
+            tree.add_edges(tree_edges)
+            tree.es["weight"] = [
+                1 if s is None else identity2value.get(round(1.0 - s, 5), round(1.0 - s, 5))
+                for s in tree_sims
+            ]
+
+        return sfdp_layout_mst(tree)
+
     def arrange(
         self,
         by="fps",
@@ -1086,30 +1492,35 @@ class ChemSpace:
 
         for method in methods:
             if (
-                "scaffolds" in method in ["csn_scaffolds", "mst_scaffolds"]
+                "scaffolds"
+                in method
+                in ["csn_scaffolds", "mst_scaffolds", "mst_scaffolds_knn"]
                 and scaffolds_index_order is False
             ):
                 self.scaffold_index_order, self.scaffold_index2order = (
                     self._arrange_by_scaffolds()
                 )
 
-                try:
-                    self._calculate_distance_matrix(
-                        index_order=self.scaffold_index_order,
-                        index2order=self.scaffold_index2order,
-                        method=method,
-                    )
-                except Exception as e:
-                    print(e)
+                # mst_scaffolds_knn builds its own approximate kNN graph on the
+                # scaffold fingerprints - no full scaffold distance matrix needed
+                if method != "mst_scaffolds_knn":
+                    try:
+                        self._calculate_distance_matrix(
+                            index_order=self.scaffold_index_order,
+                            index2order=self.scaffold_index2order,
+                            method=method,
+                        )
+                    except Exception as e:
+                        print(e)
 
-                if self.add_edges:
-                    self._get_edges(
-                        similarity_threshold=similarity_threshold,
-                        knn=knn,
-                        index_order=self.scaffold_index_order,
-                        index2order=self.scaffold_index2order,
-                        method=method,
-                    )
+                    if self.add_edges:
+                        self._get_edges(
+                            similarity_threshold=similarity_threshold,
+                            knn=knn,
+                            index_order=self.scaffold_index_order,
+                            index2order=self.scaffold_index2order,
+                            method=method,
+                        )
 
                 data = self.data
 
@@ -1157,7 +1568,15 @@ class ChemSpace:
 
                 if (
                     method
-                    in ["csn", "csn_weighted", "csn_scaffolds", "mst", "mst_scaffolds"]
+                    in [
+                        "csn",
+                        "csn_weighted",
+                        "csn_scaffolds",
+                        "mst",
+                        "mst_knn",
+                        "mst_scaffolds",
+                        "mst_scaffolds_knn",
+                    ]
                     or self.add_edges
                 ):
                     # if self.dist_matrix is False and self.edges in [False, []]:
@@ -1184,7 +1603,7 @@ class ChemSpace:
                 index2coords = {
                     index: coords[i] for i, index in enumerate(self.index_order)
                 }
-                print("Before")
+
                 for index, values in self.chemical_space["points"].items():
                     if index in index2coords:
                         point_features = self.chemical_space["points"][index][
@@ -1200,7 +1619,7 @@ class ChemSpace:
                         ] = features
                     else:
                         self.chemical_space["points"].pop(index, None)
-                print("After")
+
                 feature_names.extend(self.chemical_space.get("feature_names", []))
                 self.chemical_space["feature_names"] = feature_names
 
@@ -1210,11 +1629,37 @@ class ChemSpace:
         self.scaffold2rdmol = {}
         self.index2scaffold = {}
 
-        for i, index in enumerate(self.index_order):
-            rdmol = self.index2rdmol[index]
-            scaffold = Scaffolds.MurckoScaffold.GetScaffoldForMol(rdmol)
-            scaffold_smiles = Chem.MolToSmiles(scaffold, isomericSmiles=False)
-            self.scaffold2rdmol[scaffold_smiles] = scaffold
+        count = len(self.index_order)
+        print(f"Extracting Murcko scaffolds: {count} compounds")
+        start = time.time()
+
+        items = [(index, self.index2rdmol[index]) for index in self.index_order]
+
+        # parallel scaffold extraction; executor.map preserves the input
+        # order, so the scaffold numbering/grouping below is identical to
+        # the sequential computation
+        if self.n_jobs and self.n_jobs > 1 and count > 1000:
+            results = []
+
+            with ProcessPoolExecutor(max_workers=self.n_jobs) as executor:
+                for i, r in enumerate(
+                    executor.map(_scaffold_worker, items, chunksize=256)
+                ):
+                    results.append(r)
+
+                    if i % 10000 == 0:
+                        print(f"{i}/{count}")
+        else:
+            results = [_scaffold_worker(item) for item in items]
+
+        print("Scaffolds extracted:", round(time.time() - start, 2))
+
+        for i, (index, scaffold_smiles) in enumerate(results):
+            if scaffold_smiles not in self.scaffold2rdmol:
+                rdmol = Chem.MolFromSmiles(scaffold_smiles)
+                self.scaffold2rdmol[scaffold_smiles] = (
+                    rdmol if rdmol is not None else Chem.MolFromSmiles("")
+                )
 
             if scaffold_smiles in self.scaffold2indexes:
                 self.scaffold2indexes[scaffold_smiles].append(index)
@@ -1567,7 +2012,7 @@ if __name__ == "__main__":
         nargs="+",
         type=str,
         default="pca",
-        help="which method use for dimensional reduction (pca/isomap/csn)",
+        help="which method use for dimensional reduction (pca/mds/umap/flodr/tsne/csn/csn_scaffolds/nn/mst/mst_knn/mst_scaffolds/mst_scaffolds_knn)",
     )
     parser.add_argument(
         "-dws",
