@@ -1563,7 +1563,7 @@ class ChemSpace:
 
             if method != "none":
                 print(f"Calculating {METHODS[method]['label']}...")
-                feature_names = [f"{METHODS[method]['dim_label']} {i}" for i in [1, 2]]
+                feature_names = [f"{METHODS[method]['dim_label']} [{by}] {i}" for i in [1, 2]]
                 coords = getattr(self, f"_{method}")(data, weights=weights)
 
                 if (
